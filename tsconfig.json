@@ -1,6 +1,21 @@
 {
-  "extends": "expo/tsconfig.base",
+  "extends": "./node_modules/expo/tsconfig.base.json",
   "compilerOptions": {
-    "strict": true
-  }
+    "strict": true,
+    // The test suite runs under Node (vitest) and reads `.env` from disk, so
+    // the Node globals have to be visible to the typechecker. Expo's base
+    // config targets React Native, which has no `node:fs`, and without this
+    // `npm run typecheck` fails on the test files alone.
+    "types": ["node"],
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

@@ -18,6 +18,18 @@ expo-env.d.ts
 *.key
 *.mobileprovision
 
+# Native projects. This app uses Continuous Native Generation: android/ and
+# ios/ are produced by `expo prebuild` from app.json and the config plugins,
+# so they are build output, not source. The local android/ tree is over 1 GB.
+#
+# Nothing hand-written lives in there. The one thing that used to — the
+# LiveKit/WebRTC ProGuard keep rules, without which R8 fails the release
+# build — is now declared as `extraProguardRules` under expo-build-properties
+# in app.json, so prebuild regenerates it. Do not edit android/ by hand; a
+# change made there is lost at the next prebuild and is invisible to CI.
+/android/
+/ios/
+
 # Metro
 .metro-health-check*
 
@@ -30,12 +42,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
+# local env files (never commit real keys)
+.env
 .env*.local
 
 # typescript
 *.tsbuildinfo
-
-# generated native folders
-/ios
-/android

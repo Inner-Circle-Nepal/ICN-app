@@ -1,25 +1,99 @@
 {
   "expo": {
-    "name": "mobile",
-    "slug": "mobile",
+    "name": "Inner Circle Nepal",
+    "slug": "inner-circle-nepal",
+    "scheme": "icn",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "news.icn.mobile",
+      "associatedDomains": [
+        "applinks:icn.news"
+      ],
+      "infoPlist": {
+        "UIBackgroundModes": [
+          "remote-notification",
+          "audio"
+        ],
+        "NSMicrophoneUsageDescription": "Inner Circle Nepal uses your microphone only when you speak in a Chautari live conversation. Listeners are never recorded."
+      }
     },
     "android": {
+      "package": "news.icn.mobile",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#fbfaf7",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": true,
+          "data": [
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
+      "predictiveBackGestureEnabled": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
+      "bundler": "metro",
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-font",
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#db0a12"
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "imageWidth": 180,
+          "backgroundColor": "#fbfaf7",
+          "dark": {
+            "image": "./assets/splash-icon.png",
+            "backgroundColor": "#100f0d"
+          }
+        }
+      ],
+      "expo-image",
+      "expo-web-browser",
+      "@livekit/react-native-expo-plugin",
+      "@config-plugins/react-native-webrtc",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "extraProguardRules": "# LiveKit / WebRTC (Chautari live audio).\n# R8 fails the release build without the first line. The rest are not\n# cosmetic: WebRTC's native layer resolves Java classes and methods through\n# JNI by name, so anything R8 strips or renames becomes an\n# UnsatisfiedLinkError or a silent null at runtime rather than a build\n# error. A minified build that starts and then has no audio is the failure\n# these prevent.\n-dontwarn livekit.org.jni_zero.**\n-keep class livekit.org.webrtc.** { *; }\n-keepclassmembers class livekit.org.webrtc.** { *; }\n-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n"
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": false
     }
   }
 }
