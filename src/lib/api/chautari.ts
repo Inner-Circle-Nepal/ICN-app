@@ -1,4 +1,4 @@
-import { SITE_URL } from "@/constants/config";
+import { CHAUTARI_API_URL } from "@/constants/config";
 
 /**
  * Talking to the Chautari endpoints on the website.
@@ -72,7 +72,7 @@ async function call<T>(
 
   let response: Response;
   try {
-    response = await fetch(`${SITE_URL}${path}`, {
+    response = await fetch(`${CHAUTARI_API_URL}${path}`, {
       ...init,
       headers,
       signal: controller.signal,

@@ -11,6 +11,23 @@ export const SITE_URL = (process.env.EXPO_PUBLIC_SITE_URL ?? "https://icn.news")
   "",
 );
 
+/**
+ * Where the Chautari endpoints live.
+ *
+ * A separate origin from `SITE_URL` on purpose. The public website is hosted
+ * independently of the live-audio infrastructure, and the Chautari API runs
+ * beside the media server so a join token is minted next to the server that
+ * has to honour it. Keeping it a distinct variable means either side can
+ * move without the other being rebuilt.
+ *
+ * Shares nothing sensitive: these endpoints authenticate the reader's Clerk
+ * session and return a short-lived grant. No LiveKit credential is involved
+ * on this side of the call.
+ */
+export const CHAUTARI_API_URL = (
+  process.env.EXPO_PUBLIC_CHAUTARI_API_URL ?? "https://api.icn.news"
+).replace(/\/$/, "");
+
 export const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? "").trim();
 export const SUPABASE_ANON_KEY = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
 
