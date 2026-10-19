@@ -1,5 +1,12 @@
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
+/*
+ * Types only — `import type` is erased by TypeScript, so this cannot pull
+ * expo-notifications into the runtime graph. The module itself is resolved
+ * through the guarded accessor below, because importing it directly throws
+ * in Expo Go. See ./module.ts.
+ */
+import type * as NotificationsNS from "expo-notifications";
+import { notificationsModule } from "./module";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
 import {
@@ -31,8 +38,14 @@ import { brandColors } from "@/theme/tokens";
  * a fake backend endpoint.
  */
 
-if (Platform.OS !== "web") {
-  Notifications.setNotificationHandler({
+/*
+ * Runs at module scope by design: the handler must be registered before any
+ * notification can arrive. Guarded because in Expo Go the module is absent
+ * and this file is reachable from Settings.
+ */
+{
+  const N = Platform.OS !== "web" ? notificationsModule() : null;
+  N?.setNotificationHandler({
     handleNotification: async () => ({
       shouldShowAlert: true,
       shouldPlaySound: true,
@@ -42,6 +55,15 @@ if (Platform.OS !== "web") {
     }),
   });
 }
+
+/** The state reported when this build simply cannot do notifications. */
+const UNSUPPORTED: PushNotificationState = {
+  permission: "unsupported",
+  enabled: false,
+  deviceToken: null,
+  statusNote:
+    "This preview build cannot deliver notifications. Install the app from the app store to enable them.",
+};
 
 export type PushNotificationState = {
   permission: "undetermined" | "granted" | "denied" | "unsupported";
@@ -60,8 +82,11 @@ export async function getPushNotificationState(): Promise<PushNotificationState>
     };
   }
 
+  const N = notificationsModule();
+  if (!N) return UNSUPPORTED;
+
   try {
-    const settings = await Notifications.getPermissionsAsync();
+    const settings = await N.getPermissionsAsync();
     const storedPref = await getStoredNotificationsPref();
     const token = await getSecurePushToken();
 
@@ -97,29 +122,31 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
     };
   }
 
+  const N = notificationsModule();
+  if (!N) return UNSUPPORTED;
+
   if (Platform.OS === "android") {
-    await Notifications.setNotificationChannelAsync("breaking-news", {
+    await N.setNotificationChannelAsync("breaking-news", {
       name: "Breaking news",
       description: "Significant breaking news alerts from Inner Circle Nepal",
       /*
-       * `import/namespace` cannot follow the `export *` that re-exports this
-       * enum from NotificationChannelManager.types and reports it missing.
-       * It is a real runtime value — AndroidImportance.HIGH === 6 in
-       * expo-notifications 58 — so the rule is silenced, not the call.
+       * AndroidImportance.HIGH === 6 in expo-notifications 58. Reached
+       * through the resolved module rather than a namespace import, which
+       * also sidesteps the `import/namespace` false positive the previous
+       * form needed silencing for.
        */
-      // eslint-disable-next-line import/namespace
-      importance: Notifications.AndroidImportance.HIGH,
+      importance: N.AndroidImportance.HIGH,
       lightColor: brandColors.icn700,
       vibrationPattern: [0, 200, 120, 200],
     });
   }
 
-  const current = await Notifications.getPermissionsAsync();
+  const current = await N.getPermissionsAsync();
   let granted = current.granted;
   let canAskAgain = current.canAskAgain;
 
   if (!granted) {
-    const requested = await Notifications.requestPermissionsAsync();
+    const requested = await N.requestPermissionsAsync();
     granted = requested.granted;
     canAskAgain = requested.canAskAgain;
   }
@@ -144,8 +171,8 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
       const projectId =
         Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
       const pushTokenResponse = projectId
-        ? await Notifications.getExpoPushTokenAsync({ projectId })
-        : await Notifications.getDevicePushTokenAsync();
+        ? await N.getExpoPushTokenAsync({ projectId })
+        : await N.getDevicePushTokenAsync();
       token = String(pushTokenResponse.data);
       await setSecurePushToken(token);
     } catch {
@@ -185,7 +212,7 @@ export async function disablePushNotifications(): Promise<PushNotificationState>
  * Mirrors `PushPayload` in `site/src/lib/push/server.ts` (`{ path, title, body, tag }`).
  */
 export function extractNotificationPath(
-  response: Notifications.NotificationResponse | null,
+  response: NotificationsNS.NotificationResponse | null,
 ): string | null {
   const data = response?.notification?.request?.content?.data as
     | Record<string, unknown>
