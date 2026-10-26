@@ -1,0 +1,25 @@
+# Line endings are LF in the repository and LF on checkout, on every platform.
+#
+# Without this, `core.autocrlf=true` on a Windows clone rewrites the working
+# tree to CRLF, and the next edit produces a whole-file diff that buries the
+# real change. It also puts the UTF-8 repair in app/index.tsx at risk: a tool
+# that rewrites a file it believes is mis-encoded can silently undo it.
+#
+# This governs files from here on. Already-committed files are left alone —
+# renormalising the whole tree is a separate, deliberate act (`git add
+# --renormalize .`), not a side effect of adding this file.
+* text=auto eol=lf
+
+# Binary assets: never touched, never diffed as text.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ttf  binary
+*.otf  binary
+*.woff binary
+*.woff2 binary
+*.ico  binary
+*.keystore binary
+*.jks  binary

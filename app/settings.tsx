@@ -10,10 +10,14 @@ import {
   View,
 } from "react-native";
 import { Controller, useForm } from "react-hook-form";
+import { useRouter } from "expo-router";
+import { useAuth, useUser } from "@clerk/clerk-expo";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import Constants from "expo-constants";
 
+import { isClerkConfigured } from "@/constants/config";
+import { Avatar } from "@/components/chautari/Avatar";
 import { useTheme } from "@/hooks/useTheme";
 import { useCategories } from "@/features/categories/useCategories";
 import {
@@ -34,6 +38,79 @@ import { SectionRule } from "@/components/SectionRule";
 import { NewsletterBox } from "@/components/NewsletterBox";
 import { Logo } from "@/components/Logo";
 import type { LanguagePreference, ThemePreference } from "@/types/domain";
+
+/**
+ * The way into the reader account, from the screen people look for it on.
+ *
+ * Renders nothing when this build has no account system — the same rule the
+ * rest of the app follows, so an unconfigured build looks exactly as it did
+ * before accounts existed.
+ */
+function AccountRow() {
+  const router = useRouter();
+  const { palette } = useTheme();
+  const { isSignedIn, isLoaded } = useAuth();
+  const { user } = useUser();
+
+  if (!isClerkConfigured || !isLoaded) return null;
+
+  const email = user?.primaryEmailAddress?.emailAddress ?? null;
+  const name = user?.fullName?.trim() || user?.firstName?.trim() || email?.split("@")[0] || null;
+
+  return (
+    <View style={styles.section}>
+      <SectionRule title="Your account" />
+      <Pressable
+        onPress={() => router.push(isSignedIn ? "/profile" : "/sign-in")}
+        accessibilityRole="button"
+        accessibilityLabel={
+          isSignedIn ? `Open your profile, signed in as ${name ?? "you"}` : "Sign in"
+        }
+        style={({ pressed }) => [
+          accountStyles.row,
+          { borderBottomColor: palette.rule },
+          pressed && accountStyles.pressed,
+        ]}
+      >
+        {/*
+          Signed out there is no picture to show, and `hasImage` keeps Clerk's
+          generated placeholder from standing in for one the reader never set.
+        */}
+        <Avatar
+          name={name ?? "?"}
+          size="md"
+          imageUrl={isSignedIn && user?.hasImage ? user.imageUrl : null}
+        />
+        <View style={accountStyles.text}>
+          <Text style={[accountStyles.name, { color: palette.ink }]} numberOfLines={1}>
+            {isSignedIn ? (name ?? "Your profile") : "Sign in"}
+          </Text>
+          <Text style={[accountStyles.meta, { color: palette.quiet }]} numberOfLines={1}>
+            {isSignedIn
+              ? (email ?? "Edit your name and briefing")
+              : "Reading is free. An account is only for Chautari."}
+          </Text>
+        </View>
+        <Text style={[accountStyles.chevron, { color: palette.quiet }]}>›</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+const accountStyles = StyleSheet.create({
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 14,
+    paddingVertical: 14,
+    borderBottomWidth: 1,
+  },
+  text: { flex: 1, minWidth: 0 },
+  name: { fontFamily: fontFamilies.serifMedium, fontSize: 17 },
+  meta: { fontFamily: fontFamilies.sansRegular, fontSize: 12, marginTop: 2 },
+  chevron: { fontFamily: fontFamilies.serifRegular, fontSize: 22 },
+  pressed: { opacity: 0.75 },
+});
 
 const tipFormSchema = z.object({
   desk: z.enum(["tips", "corrections", "editor"]),
@@ -224,6 +301,9 @@ export default function SettingsScreen() {
             and newsroom dispatches.
           </Text>
         </View>
+
+        {/* 0. Your account — only when accounts exist in this build. */}
+        <AccountRow />
 
         {/* 1. Reading & Appearance */}
         <View style={styles.section}>

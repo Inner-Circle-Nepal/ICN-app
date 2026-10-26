@@ -4,7 +4,7 @@ import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
-import * as Notifications from "expo-notifications";
+import { notificationsModule } from "@/lib/notifications/module";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { QueryClientProvider } from "@tanstack/react-query";
 /*
@@ -87,13 +87,18 @@ function AppShell() {
       navigateToUrl(event.url);
     });
 
-    if (Platform.OS !== "web") {
-      const notifSub = Notifications.addNotificationResponseReceivedListener(
-        (response) => {
-          const path = extractNotificationPath(response);
-          navigateToUrl(path);
-        },
-      );
+    /*
+     * Absent in Expo Go, where the native module does not exist. Importing
+     * it directly here used to throw during module evaluation, so this
+     * layout exported no default and the entire app failed to mount — see
+     * src/lib/notifications/module.ts.
+     */
+    const N = Platform.OS !== "web" ? notificationsModule() : null;
+    if (N) {
+      const notifSub = N.addNotificationResponseReceivedListener((response) => {
+        const path = extractNotificationPath(response);
+        navigateToUrl(path);
+      });
       return () => {
         urlSub.remove();
         notifSub.remove();
@@ -129,12 +134,20 @@ function AppShell() {
             options={{ animation: "slide_from_bottom" }}
           />
           <Stack.Screen
+            name="chautari/earn"
+            options={{ animation: "slide_from_right" }}
+          />
+          <Stack.Screen
             name="chautari/[slug]"
             options={{ animation: "slide_from_right" }}
           />
           <Stack.Screen
             name="sign-in"
             options={{ animation: "slide_from_bottom" }}
+          />
+          <Stack.Screen
+            name="profile"
+            options={{ animation: "slide_from_right" }}
           />
           <Stack.Screen
             name="search"

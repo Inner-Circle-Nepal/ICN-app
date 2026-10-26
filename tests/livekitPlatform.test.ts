@@ -40,8 +40,12 @@ describe("the two platform files stay in sync", () => {
   });
 
   it("exports the same shapes", () => {
-    for (const key of Object.keys(web) as (keyof typeof web)[]) {
-      expect(typeof native[key], `export "${key}"`).toBe(typeof web[key]);
+    // Indexed through plain records: computed access straight onto an
+    // imported namespace is something `import/namespace` cannot validate.
+    const w = web as unknown as Record<string, unknown>;
+    const n = native as unknown as Record<string, unknown>;
+    for (const key of Object.keys(w)) {
+      expect(typeof n[key], `export "${key}"`).toBe(typeof w[key]);
     }
     expect(Object.keys(native.audioSession).sort()).toEqual(
       Object.keys(web.audioSession).sort(),

@@ -47,7 +47,7 @@ import { CachedNoticeBanner, ErrorState } from "@/components/ErrorState";
  *   - Chosen Diaspora Edition band (when stories are tagged to the edition)
  *   - "Latest" wire grid & briefs + "Load more from the wire" infinite paging
  *   - "Visas & immigration" section rail
- *   - "Most read" numbered ranking (01â€“05)
+ *   - "Most read" numbered ranking (01–05)
  *   - NEPSE Index strip & "Send home" Remittance Converter
  *   - "Six continents. One newsroom." Newsletter band
  *   - "Investigations" panel (locked teaser or live stories)
@@ -140,8 +140,8 @@ export default function HomeScreen() {
       <View style={[styles.screen, { backgroundColor: palette.paper }]}>
         <AppHeader showSectionBar={false} />
         <ErrorState
-          title="The front page couldnâ€™t be reached"
-          message="We couldnâ€™t connect to the Inner Circle Nepal newsroom. Check your internet connection and try again."
+          title="The front page couldn’t be reached"
+          message="We couldn’t connect to the Inner Circle Nepal newsroom. Check your internet connection and try again."
           onRetry={handleRefresh}
         />
       </View>
@@ -163,7 +163,7 @@ export default function HomeScreen() {
         >
           <EmptyState
             kicker="Inner Circle Nepal"
-            title="The presses havenâ€™t rolled yet."
+            title="The presses haven’t rolled yet."
             description="No stories have been published. Once the newsroom files its first piece it will appear here."
             actionLabel="Refresh edition"
             onAction={handleRefresh}
@@ -202,7 +202,7 @@ export default function HomeScreen() {
         grows without bound: every "Load more" appends another twelve stories,
         each with a photograph, and a ScrollView keeps all of them mounted.
         The curated top of the page is fixed in length, so it stays in the
-        header; only the wire â€” the part that grows â€” is virtualised.
+        header; only the wire — the part that grows — is virtualised.
       */}
       <FlatList
         data={extraWireStories}
@@ -246,7 +246,7 @@ export default function HomeScreen() {
             ]}
           >
             <Text style={[styles.datelineText, { color: palette.quiet }]}>
-              {kathmanduDate} Â· {kathmanduTime} NPT Â· Kathmandu
+              {kathmanduDate} · {kathmanduTime} NPT · Kathmandu
             </Text>
             <Text style={[styles.taglineText, { color: palette.quiet }]}>
               {site.tagline}
@@ -406,7 +406,7 @@ function HomeFooterSections({
           >
             <Text style={[styles.loadMoreText, { color: palette.ink }]}>
               {wireQuery.isFetchingNextPage
-                ? "Loading more storiesâ€¦"
+                ? "Loading more stories…"
                 : "Load more from the wire"}
             </Text>
           </Pressable>
@@ -422,7 +422,7 @@ function HomeFooterSections({
               onPressCta={() => router.push("/category/immigration")}
             />
             <Text style={[styles.sectionDeck, { color: palette.quiet }]}>
-              Rule changes across the US, UK, Australia, Canada and the Gulf â€” read before they reach your inbox, explained without the jargon.
+              Rule changes across the US, UK, Australia, Canada and the Gulf — read before they reach your inbox, explained without the jargon.
             </Text>
 
             {immigration.map((story, idx) => (
@@ -479,7 +479,7 @@ function HomeFooterSections({
             ]}
           >
             <Text style={[styles.lockedKicker, { color: palette.red }]}>
-              Investigations Â· in preparation
+              Investigations · in preparation
             </Text>
             <Text style={[styles.lockedTitle, { color: palette.ink }]}>
               The first one is being verified.
