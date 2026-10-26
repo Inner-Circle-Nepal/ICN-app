@@ -134,12 +134,20 @@ function AppShell() {
             options={{ animation: "slide_from_bottom" }}
           />
           <Stack.Screen
+            name="chautari/earn"
+            options={{ animation: "slide_from_right" }}
+          />
+          <Stack.Screen
             name="chautari/[slug]"
             options={{ animation: "slide_from_right" }}
           />
           <Stack.Screen
             name="sign-in"
             options={{ animation: "slide_from_bottom" }}
+          />
+          <Stack.Screen
+            name="profile"
+            options={{ animation: "slide_from_right" }}
           />
           <Stack.Screen
             name="search"

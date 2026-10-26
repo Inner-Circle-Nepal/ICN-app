@@ -72,6 +72,14 @@
         }
       ],
       [
+        "expo-image-picker",
+        {
+          "photosPermission": "Inner Circle Nepal uses your photo library only when you choose a profile picture. Nothing is uploaded until you pick one.",
+          "cameraPermission": false,
+          "microphonePermission": "Inner Circle Nepal uses your microphone only when you speak in a Chautari live conversation. Listeners are never recorded."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",

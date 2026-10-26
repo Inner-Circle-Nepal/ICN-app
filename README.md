@@ -37,6 +37,19 @@ cd mobile
 npm install
 ```
 
+> **Do not remove the `typescript` override in `package.json`.** It exists so
+> that `npm ci` resolves the same tree on every npm version, which is what the
+> EAS builder runs. Clerk pulls in `@solana/web3.js` (via `@clerk/clerk-js` and
+> the Solana wallet adapters), whose nested `@solana/codecs-*` packages declare
+> an optional `typescript: ^5.0.0` peer. Our root TypeScript is 6.x, so that
+> peer is unsatisfiable: npm 11 quietly skips it, while npm 10 — the version on
+> the EAS image — installs a second, nested `typescript@5.9.3`. A lockfile
+> written by npm 11 therefore has no entry for it, and `npm ci` on EAS fails the
+> Install dependencies phase with `Missing: typescript@5.9.3 from lock file`.
+> Pinning every `typescript` edge to our own version (`$typescript`) removes the
+> nested copy, so both npm versions agree. Regenerate the lockfile with
+> `npm install` after changing the TypeScript version.
+
 ### 2. Configure environment variables
 Copy `.env.example` to `.env` and populate the public client variables (already configured for local development in `.env`):
 
