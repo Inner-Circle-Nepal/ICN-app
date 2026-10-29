@@ -24,6 +24,7 @@
     },
 
     "production": {
+      "environment": "production",
       "autoIncrement": true,
       "ios": { "resourceClass": "m-medium" },
       "android": { "buildType": "app-bundle" },
@@ -32,6 +33,8 @@
   },
 
   "submit": {
-    "production": {}
+    "production": {
+      "ios": { "ascAppId": "6828508148" }
+    }
   }
 }

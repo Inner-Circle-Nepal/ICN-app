@@ -18,7 +18,8 @@
           "remote-notification",
           "audio"
         ],
-        "NSMicrophoneUsageDescription": "Inner Circle Nepal uses your microphone only when you speak in a Chautari live conversation. Listeners are never recorded."
+        "NSMicrophoneUsageDescription": "Inner Circle Nepal uses your microphone only when you speak in a Chautari live conversation. Listeners are never recorded.",
+        "ITSAppUsesNonExemptEncryption": false
       },
       "bitcode": false
     },
@@ -75,7 +76,7 @@
         "expo-image-picker",
         {
           "photosPermission": "Inner Circle Nepal uses your photo library only when you choose a profile picture. Nothing is uploaded until you pick one.",
-          "cameraPermission": false,
+          "cameraPermission": "Inner Circle Nepal does not use your camera. Chautari's live audio library can also carry video, so iOS asks the app to describe camera access, but the app never turns the camera on.",
           "microphonePermission": "Inner Circle Nepal uses your microphone only when you speak in a Chautari live conversation. Listeners are never recorded."
         }
       ],
