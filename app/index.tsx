@@ -17,7 +17,7 @@ import { CachedNoticeBanner, ErrorState } from "@/components/ErrorState";
  *
  * The editors' lead story comes first, then every other story newest first,
  * loading more as the reader scrolls. Every story appears once. Sections, markets and the newsletter
- * live in Explore and Settings, so the front page is only stories.
+ * live in Newsroom and Settings, so the front page is only stories.
  */
 
 const WIRE_PAGE = 12;

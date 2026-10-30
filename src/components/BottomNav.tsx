@@ -10,7 +10,7 @@ import { fontFamilies } from "@/theme/tokens";
 /**
  * Editorial bottom navigation bar.
  *
- * Tabs: Home (`/`), Explore, Chautari, Saved, Settings. The active tab is
+ * Tabs: Home (`/`), Newsroom (`/explore`), Chautari, Saved, Settings. The active tab is
  * marked by a filled (or heavier) icon and an ink label.
  */
 
@@ -49,16 +49,32 @@ export function BottomNav() {
     },
     {
       key: "explore",
-      label: "Explore",
+      label: "Newsroom",
       href: "/explore" as const,
       active: pathname === "/explore",
+      /*
+       * A folded newspaper, not a magnifier: search is the header's job, and
+       * a magnifier here read as a second search button.
+       */
       icon: (color: string, active: boolean) => (
         <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
-          <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={active ? 2.2 : 1.7} />
           <Path
-            d="m16.5 16.5 4.5 4.5"
+            d="M4 5.5h13v13a1.5 1.5 0 0 0 1.5 1.5H5.5A1.5 1.5 0 0 1 4 18.5v-13Z"
             stroke={color}
-            strokeWidth={1.7}
+            strokeWidth={active ? 2 : 1.7}
+            strokeLinejoin="round"
+            fill={active ? color : "none"}
+          />
+          <Path
+            d="M17 9h3v9.5a1.5 1.5 0 0 1-3 0V9Z"
+            stroke={color}
+            strokeWidth={active ? 2 : 1.7}
+            strokeLinejoin="round"
+          />
+          <Path
+            d="M7 9h7M7 12.5h7M7 16h4.5"
+            stroke={active ? palette.paper : color}
+            strokeWidth={1.5}
             strokeLinecap="round"
           />
         </Svg>

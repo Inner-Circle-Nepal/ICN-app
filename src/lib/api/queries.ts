@@ -457,7 +457,7 @@ export async function searchArticles(
  * beside it, then the latest wire. Two requests in parallel.
  *
  * Markets, desks and "most read" are not part of it: the home feed shows
- * only stories, and those sections live in Explore. (The feed used to wait
+ * only stories, and those sections live in Newsroom. (The feed used to wait
  * for Nepal Rastra Bank's 2–3 s forex API and fetch desks one after the
  * other, which held a cold launch on placeholders for ~6 s.)
  */
