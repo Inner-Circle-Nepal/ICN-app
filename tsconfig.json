@@ -16,6 +16,8 @@
     "**/*.tsx"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    // Supabase Edge Functions run on Deno, not in the app.
+    "supabase"
   ]
 }

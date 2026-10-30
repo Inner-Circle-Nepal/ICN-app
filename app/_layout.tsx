@@ -36,7 +36,7 @@ import { persistOptions, queryClient } from "@/lib/query/queryClient";
 import { ThemeProvider, useAppTheme } from "@/theme/ThemeContext";
 import { BookmarksProvider } from "@/features/bookmarks/BookmarksContext";
 import { BottomNav } from "@/components/BottomNav";
-import { extractNotificationPath } from "@/lib/notifications/push";
+import { extractNotificationPath, syncPushRegistration } from "@/lib/notifications/push";
 import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
 
 LogBox.ignoreLogs(["Invalid DOM property `transform-origin`"]);
@@ -99,6 +99,22 @@ function AppShell() {
         const path = extractNotificationPath(response);
         navigateToUrl(path);
       });
+
+      /*
+       * The listener above only hears taps while the app is running. A tap
+       * that LAUNCHED the app arrived before it was attached, so it is read
+       * back here — otherwise a breaking-news alert opened from a closed app
+       * lands on the front page instead of the story. Cleared once handled so
+       * a later remount does not open the same story again.
+       */
+      void N.getLastNotificationResponseAsync().then((response) => {
+        if (!response) return;
+        navigateToUrl(extractNotificationPath(response));
+        void N.clearLastNotificationResponseAsync();
+      });
+
+      // Keep the newsroom's list current: tokens rotate, and an offline opt-in needs retrying.
+      void syncPushRegistration();
       return () => {
         urlSub.remove();
         notifSub.remove();

@@ -19,6 +19,7 @@ import {
   setStoredNotificationsPref,
 } from "@/lib/storage/preferences";
 import { brandColors } from "@/theme/tokens";
+import { registerPushToken, unregisterPushToken } from "@/lib/api/pushRegistry";
 
 /**
  * Breaking-news notification infrastructure for Inner Circle Nepal Mobile.
@@ -29,13 +30,12 @@ import { brandColors } from "@/theme/tokens";
  *   2. Handle OS-level denial honestly without nagging.
  *   3. Deep-link notification taps directly to the story inside the app.
  *
- * Note on backend support:
- * The website backend (`site/src/lib/push/server.ts`) currently implements
- * Web Push (`web-push` with VAPID browser endpoints in `push_subscriptions`).
- * It does not yet have an Expo Push / FCM / APNs sender service. This module
- * manages native permissions, Android notification channels, local token
- * storage in SecureStore, and deep-link navigation on tap, without inventing
- * a fake backend endpoint.
+ * Delivery:
+ * The website sends Web Push to browsers. Phones are separate: the Expo push
+ * token is registered in Supabase (`mobile_push_tokens`, via
+ * `src/lib/api/pushRegistry.ts`) and the `send-breaking-push` Edge Function
+ * alerts every registered phone when a story is published as breaking. See
+ * supabase/README.md.
  */
 
 /*
@@ -175,9 +175,13 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
         : await N.getDevicePushTokenAsync();
       token = String(pushTokenResponse.data);
       await setSecurePushToken(token);
+      if (!(await registerPushToken(token))) {
+        statusNote =
+          "Alerts are on. We could not reach the newsroom just now; this phone will be registered the next time the app opens.";
+      }
     } catch {
       statusNote =
-        "Notification permission granted on this device. Remote push dispatch awaits EAS/FCM server credentials.";
+        "Notification permission granted, but this phone could not get a push address. Please try again later.";
     }
   } else {
     statusNote =
@@ -196,6 +200,8 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
 
 export async function disablePushNotifications(): Promise<PushNotificationState> {
   await setStoredNotificationsPref(false);
+  const token = await getSecurePushToken();
+  if (token) await unregisterPushToken(token);
   await clearSecurePushToken();
 
   const state = await getPushNotificationState();
@@ -205,6 +211,41 @@ export async function disablePushNotifications(): Promise<PushNotificationState>
     deviceToken: null,
     statusNote: null,
   };
+}
+
+/**
+ * Re-register on launch for a reader who has alerts on.
+ *
+ * Expo tokens can change (reinstall, restore to a new phone), an opt-in made
+ * offline never reached Supabase, and the stored language/edition may have
+ * changed since. Never prompts: if permission was withdrawn in system
+ * settings, the old token is removed instead. Silent on any failure.
+ */
+export async function syncPushRegistration(): Promise<void> {
+  if (Platform.OS === "web" || !Device.isDevice) return;
+  const N = notificationsModule();
+  if (!N) return;
+  try {
+    if (!(await getStoredNotificationsPref())) return;
+    const previous = await getSecurePushToken();
+
+    const { granted } = await N.getPermissionsAsync();
+    if (!granted) {
+      if (previous) await unregisterPushToken(previous);
+      return;
+    }
+
+    const projectId =
+      Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+    if (!projectId) return;
+    const current = String((await N.getExpoPushTokenAsync({ projectId })).data);
+
+    if (previous && previous !== current) await unregisterPushToken(previous);
+    if (current !== previous) await setSecurePushToken(current);
+    await registerPushToken(current);
+  } catch {
+    // Next launch tries again.
+  }
 }
 
 /**
