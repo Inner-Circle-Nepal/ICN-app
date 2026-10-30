@@ -117,7 +117,7 @@ function FeedCardInner({ article }: { article: ArticleCard }) {
 
       {/* The fade that keeps white text readable on any photograph. */}
       {hasImage ? (
-        <Svg style={StyleSheet.absoluteFill} pointerEvents="none">
+        <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
           <Defs>
             <LinearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
               <Stop offset="0.25" stopColor="#000" stopOpacity="0" />
