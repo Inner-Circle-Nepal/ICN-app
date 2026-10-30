@@ -14,6 +14,7 @@ import {
 import { useRouter } from "expo-router";
 import { useSignIn, useSignUp, useAuth } from "@clerk/clerk-expo";
 import Svg, { Path } from "react-native-svg";
+import * as Crypto from "expo-crypto";
 
 import { isClerkConfigured } from "@/constants/config";
 import { useTheme } from "@/hooks/useTheme";
@@ -94,12 +95,19 @@ export default function SignInScreen() {
 
     try {
       if (isNewAccount) {
-        const result = await signUp!.attemptEmailAddressVerification({ code: entered });
+        let result = await signUp!.attemptEmailAddressVerification({ code: entered });
+        if (result.status === "missing_requirements") {
+          result = await completeSignUpRequirements(signUp!, email);
+        }
         if (result.status === "complete") {
           await setSignUpActive!({ session: result.createdSessionId });
           back();
           return;
         }
+        setError(
+          "Your email is verified, but the account could not be finished here. Please create it at icn.news, then sign in with this address.",
+        );
+        return;
       } else {
         const result = await signIn!.attemptFirstFactor({ strategy: "email_code", code: entered });
         if (result.status === "complete") {
@@ -258,6 +266,56 @@ export default function SignInScreen() {
       </ScrollView>
     </KeyboardAvoidingView>
   );
+}
+
+type SignUp = NonNullable<ReturnType<typeof useSignUp>["signUp"]>;
+
+/**
+ * Fill in what the shared Clerk instance demands beyond a verified email.
+ *
+ * The website's Clerk application requires a username and a password on
+ * sign-up. The app signs people in with emailed codes only, so after the
+ * email is verified a new account sits in `missing_requirements` and never
+ * completes. The reader is not asked for either: the username is derived
+ * from their address (they can change it on icn.news), and the password is
+ * long, random and never shown — they keep signing in by email code, and
+ * can set one of their own through icn.news if they ever want it.
+ */
+async function completeSignUpRequirements(signUp: SignUp, email: string) {
+  const missing = new Set(signUp.missingFields);
+  const base =
+    email
+      .split("@")[0]
+      .toLowerCase()
+      .replace(/[^a-z0-9_]/g, "")
+      .slice(0, 20) || "reader";
+
+  let result = signUp;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const update: { username?: string; password?: string } = {};
+    if (missing.has("username")) update.username = `${base}${randomDigits(4 + attempt)}`;
+    if (missing.has("password")) update.password = randomPassword();
+    try {
+      result = await signUp.update(update);
+      return result;
+    } catch (e) {
+      // A taken username is the only error worth retrying with a new suffix.
+      const errs = (e as { errors?: { code?: string }[] })?.errors;
+      if (!errs?.some((x) => x.code === "form_identifier_exists")) throw e;
+    }
+  }
+  return result;
+}
+
+function randomDigits(n: number): string {
+  return Array.from(Crypto.getRandomBytes(n), (b) => String(b % 10)).join("");
+}
+
+function randomPassword(): string {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!#%+-=";
+  const body = Array.from(Crypto.getRandomBytes(32), (b) => chars[b % chars.length]).join("");
+  // One of each class, so any complexity rule on the Clerk side is met.
+  return `${body}aZ7#`;
 }
 
 /** Clerk's errors are structured; show the first message, not a stack. */
