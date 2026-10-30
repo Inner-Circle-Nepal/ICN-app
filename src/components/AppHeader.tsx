@@ -58,6 +58,8 @@ interface AppHeaderProps {
   activeCategorySlug?: string;
   onSelectCategory?: (slug: string) => void;
   showSectionBar?: boolean;
+  /** Off on screens that already have their own search box (Newsroom). */
+  showSearch?: boolean;
 }
 
 export function AppHeader({
@@ -65,6 +67,7 @@ export function AppHeader({
   activeCategorySlug,
   onSelectCategory,
   showSectionBar = true,
+  showSearch = true,
 }: AppHeaderProps) {
   const router = useRouter();
   const { palette } = useTheme();
@@ -86,23 +89,25 @@ export function AppHeader({
         </Pressable>
 
         <View style={styles.rightActions}>
-          <Pressable
-            onPress={() => router.push("/search")}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel="Search articles"
-            style={styles.iconBtn}
-          >
-            <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-              <Circle cx={11} cy={11} r={7} stroke={palette.ink} strokeWidth={1.8} />
-              <Path
-                d="m16.5 16.5 4.5 4.5"
-                stroke={palette.ink}
-                strokeWidth={1.8}
-                strokeLinecap="round"
-              />
-            </Svg>
-          </Pressable>
+          {showSearch ? (
+            <Pressable
+              onPress={() => router.push("/search")}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Search articles"
+              style={styles.iconBtn}
+            >
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                <Circle cx={11} cy={11} r={7} stroke={palette.ink} strokeWidth={1.8} />
+                <Path
+                  d="m16.5 16.5 4.5 4.5"
+                  stroke={palette.ink}
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                />
+              </Svg>
+            </Pressable>
+          ) : null}
 
           {isClerkConfigured ? <AccountButton /> : null}
         </View>

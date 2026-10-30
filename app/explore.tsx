@@ -88,6 +88,7 @@ export default function ExploreScreen() {
         categories={categories}
         activeCategorySlug={selectedSlug}
         onSelectCategory={(slug) => setSelectedSlug(slug)}
+        showSearch={false}
       />
 
       <FlatList
