@@ -2,7 +2,7 @@ import React from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Path, Rect } from "react-native-svg";
+import Svg, { Circle, Path } from "react-native-svg";
 import { useBookmarks } from "@/features/bookmarks/BookmarksContext";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
@@ -10,12 +10,11 @@ import { fontFamilies } from "@/theme/tokens";
 /**
  * Editorial bottom navigation bar.
  *
- * Tabs:
- *   - Home (`/`)
- *   - Explore (`/explore`)
- *   - Saved (`/bookmarks`)
- *   - Settings (`/settings`)
+ * Tabs: Home (`/`), Explore, Chautari, Saved, Settings. The active tab is
+ * marked by a filled (or heavier) icon and an ink label.
  */
+
+const ICON = 24;
 
 const TAB_ROUTES = new Set(["/", "/explore", "/chautari", "/bookmarks", "/settings"]);
 
@@ -36,13 +35,14 @@ export function BottomNav() {
       label: "Home",
       href: "/" as const,
       active: pathname === "/",
-      icon: (color: string) => (
-        <Svg width={19} height={19} viewBox="0 0 24 24" fill="none">
+      icon: (color: string, active: boolean) => (
+        <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
           <Path
-            d="M4 6h16M4 12h16M4 18h10"
+            d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1h-5v-6h-5v6h-5a1 1 0 0 1-1-1v-9.5Z"
             stroke={color}
-            strokeWidth={1.6}
-            strokeLinecap="round"
+            strokeWidth={1.7}
+            strokeLinejoin="round"
+            fill={active ? color : "none"}
           />
         </Svg>
       ),
@@ -52,13 +52,13 @@ export function BottomNav() {
       label: "Explore",
       href: "/explore" as const,
       active: pathname === "/explore",
-      icon: (color: string) => (
-        <Svg width={19} height={19} viewBox="0 0 24 24" fill="none">
-          <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={1.6} />
+      icon: (color: string, active: boolean) => (
+        <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
+          <Circle cx={11} cy={11} r={7} stroke={color} strokeWidth={active ? 2.2 : 1.7} />
           <Path
             d="m16.5 16.5 4.5 4.5"
             stroke={color}
-            strokeWidth={1.6}
+            strokeWidth={1.7}
             strokeLinecap="round"
           />
         </Svg>
@@ -75,12 +75,12 @@ export function BottomNav() {
        * the ink colour and the 1.6 stroke every other tab uses.
        */
       icon: (color: string) => (
-        <Svg width={19} height={19} viewBox="0 0 24 24" fill="none">
-          <Circle cx={12} cy={12} r={2.5} stroke={color} strokeWidth={1.6} />
+        <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
+          <Circle cx={12} cy={12} r={2.5} stroke={color} strokeWidth={1.7} />
           <Path
             d="M7.5 8.5a6 6 0 0 0 0 7M16.5 8.5a6 6 0 0 1 0 7"
             stroke={color}
-            strokeWidth={1.6}
+            strokeWidth={1.7}
             strokeLinecap="round"
           />
           <Path
@@ -100,11 +100,11 @@ export function BottomNav() {
       active: pathname === "/bookmarks",
       badgeCount: bookmarks.length,
       icon: (color: string, active: boolean) => (
-        <Svg width={19} height={19} viewBox="0 0 24 24" fill="none">
+        <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
           <Path
             d="M6 4h12a1 1 0 0 1 1 1v15.5l-7-4-7 4V5a1 1 0 0 1 1-1Z"
             stroke={color}
-            strokeWidth={1.6}
+            strokeWidth={1.7}
             fill={active ? color : "none"}
             strokeLinejoin="round"
           />
@@ -116,17 +116,14 @@ export function BottomNav() {
       label: "Settings",
       href: "/settings" as const,
       active: pathname === "/settings",
-      icon: (color: string) => (
-        <Svg width={19} height={19} viewBox="0 0 24 24" fill="none">
-          <Rect
-            x={4}
-            y={5}
-            width={16}
-            height={14}
+      icon: (color: string, active: boolean) => (
+        <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
+          <Path
+            d="M4 6.5h16M4 12h16M4 17.5h16"
             stroke={color}
-            strokeWidth={1.6}
+            strokeWidth={active ? 2.2 : 1.7}
+            strokeLinecap="round"
           />
-          <Path d="M4 9.5h16" stroke={color} strokeWidth={1.4} />
         </Svg>
       ),
     },
@@ -165,12 +162,6 @@ export function BottomNav() {
             accessibilityLabel={tab.label}
             style={styles.tabItem}
           >
-            <View
-              style={[
-                styles.activeIndicator,
-                { backgroundColor: tab.active ? palette.ink : "transparent" },
-              ]}
-            />
             <View style={styles.iconWrap}>
               {tab.icon(color, tab.active)}
               {tab.badgeCount && tab.badgeCount > 0 ? (
@@ -205,15 +196,9 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     minHeight: 52,
   },
-  activeIndicator: {
-    position: "absolute",
-    top: 0,
-    width: 28,
-    height: 1.5,
-  },
   iconWrap: {
     position: "relative",
-    height: 22,
+    height: 26,
     justifyContent: "center",
     alignItems: "center",
   },
@@ -236,8 +221,8 @@ const styles = StyleSheet.create({
   },
   tabLabel: {
     fontFamily: fontFamilies.sansMedium,
-    fontSize: 10,
-    letterSpacing: 1.1,
+    fontSize: 10.5,
+    letterSpacing: 1.2,
     textTransform: "uppercase",
     marginTop: 4,
   },

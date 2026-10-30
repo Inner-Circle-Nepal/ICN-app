@@ -453,33 +453,21 @@ export async function searchArticles(
 /* -------------------------------------------------------------------------- */
 
 /**
- * The front page's stories, in one parallel round.
+ * The front page's running order: the lead, the stories the editors placed
+ * beside it, then the latest wire. Two requests in parallel.
  *
- * Every request starts at once: the feed used to wait for exchange rates and
- * NEPSE (Nepal Rastra Bank's API alone takes 2–3 s) and then fetch the
- * Immigration and Investigations desks one after the other, so a cold launch
- * showed placeholders for ~6 s. Markets now load through their own queries
- * (`useForexRates`, `useNepseIndex`) and fill in when ready, and the desk
- * lists are fetched alongside everything else. A locked Investigations desk
- * is dropped after the fact rather than checked first.
+ * Markets, desks and "most read" are not part of it: the home feed shows
+ * only stories, and those sections live in Explore. (The feed used to wait
+ * for Nepal Rastra Bank's 2–3 s forex API and fetch desks one after the
+ * other, which held a cold launch on placeholders for ~6 s.)
  */
 export async function getHomeFeed(): Promise<HomeFeedData> {
-  const [featured, latest, trending, categories, immigration, investigations] =
-    await Promise.all([
-      getFeaturedArticles(5),
-      getLatestArticles(18),
-      getTrendingArticles(5),
-      getCategories(),
-      getArticlesByCategory("immigration", 3).catch(() => []),
-      getArticlesByCategory("investigations", 3).catch(() => []),
-    ]);
+  const [featured, latest] = await Promise.all([
+    getFeaturedArticles(5),
+    getLatestArticles(18),
+  ]);
 
-  const investigationsCategory =
-    categories.find((c) => c.slug === "investigations") ?? null;
-  const investigationStories =
-    investigationsCategory && !investigationsCategory.is_locked ? investigations : [];
-
-  // Replicate exact homepage editorial curation logic from `site/src/app/(site)/page.tsx`
+  // Same curation as `site/src/app/(site)/page.tsx`.
   const [firstFeatured, ...restFeatured] = featured;
   const lead = firstFeatured ?? latest[0] ?? null;
 
@@ -492,26 +480,11 @@ export async function getHomeFeed(): Promise<HomeFeedData> {
   const alsoLeading = rail.slice(0, 3);
 
   const used = new Set([lead?.slug, ...alsoLeading.map((a) => a.slug)].filter(Boolean));
-  const wire = latest.filter((a) => !used.has(a.slug));
-
-  const secondLead = wire.slice(0, 2);
-  const railUsed = new Set(investigationStories.map((a) => a.slug));
-  const grid = wire
-    .slice(2)
-    .filter((a) => !railUsed.has(a.slug))
-    .slice(0, 8);
 
   return {
     lead,
-    secondLead,
     alsoLeading,
-    latestGrid: grid.slice(0, 4),
-    latestBriefs: grid.slice(4, 8),
-    immigration,
-    trending,
-    investigationsCategory,
-    investigationStories,
-    categories,
+    latest: latest.filter((a) => !used.has(a.slug)),
     fetchedAt: new Date().toISOString(),
   };
 }
