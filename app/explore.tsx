@@ -47,7 +47,9 @@ export default function ExploreScreen() {
   const nepseQuery = useNepseSnapshot();
 
   const [selectedSlug, setSelectedSlug] = useState<string>("nepal");
-  const [showTools, setShowTools] = useState<"none" | "forex" | "nepse">("none");
+  const [showTools, setShowTools] = useState<"none" | "forex" | "nepse">(
+    "none",
+  );
 
   const articlesQuery = useInfiniteCategoryArticles(selectedSlug);
 
@@ -111,10 +113,7 @@ export default function ExploreScreen() {
           <View style={styles.headerContainer}>
             {/* Page Title + Search Trigger */}
             <View
-              style={[
-                styles.heroHeader,
-                { borderBottomColor: palette.ink },
-              ]}
+              style={[styles.heroHeader, { borderBottomColor: palette.ink }]}
             >
               <Text style={[styles.kicker, { color: palette.quiet }]}>
                 Discovery · Sections & desks
@@ -217,34 +216,6 @@ export default function ExploreScreen() {
               ) : null}
             </View>
 
-            {/* Topic Tags */}
-            {tagsQuery.data && tagsQuery.data.length > 0 ? (
-              <View style={styles.tagsSection}>
-                <SectionRule title="Topics in the news" />
-                <View style={styles.tagsRow}>
-                  {tagsQuery.data.map((t) => (
-                    <Pressable
-                      key={t.slug}
-                      onPress={() =>
-                        router.push({
-                          pathname: "/search",
-                          params: { tag: t.slug },
-                        })
-                      }
-                      style={[
-                        styles.tagChip,
-                        { borderColor: palette.rule2 },
-                      ]}
-                    >
-                      <Text style={[styles.tagText, { color: palette.ink }]}>
-                        #{t.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ) : null}
-
             {/* Active Section Feed Header */}
             <View style={styles.feedHeader}>
               <SectionRule
@@ -312,11 +283,38 @@ export default function ExploreScreen() {
           </View>
         )}
         ListFooterComponent={
-          articlesQuery.isFetchingNextPage ? (
-            <View style={styles.loaderWrap}>
-              <ActivityIndicator color={palette.ink} />
-            </View>
-          ) : undefined
+          <View>
+            {articlesQuery.isFetchingNextPage ? (
+              <View style={styles.loaderWrap}>
+                <ActivityIndicator color={palette.ink} />
+              </View>
+            ) : null}
+
+            {/* Topic Tags, at the foot of the page below the section's stories */}
+            {tagsQuery.data && tagsQuery.data.length > 0 ? (
+              <View style={styles.tagsSection}>
+                <SectionRule title="Topics in the news" />
+                <View style={styles.tagsRow}>
+                  {tagsQuery.data.map((t) => (
+                    <Pressable
+                      key={t.slug}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/search",
+                          params: { tag: t.slug },
+                        })
+                      }
+                      style={[styles.tagChip, { borderColor: palette.rule2 }]}
+                    >
+                      <Text style={[styles.tagText, { color: palette.ink }]}>
+                        #{t.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+          </View>
         }
       />
     </View>
