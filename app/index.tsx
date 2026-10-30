@@ -14,6 +14,7 @@ import {
   useHomeFeed,
   useInfiniteLatestArticles,
 } from "@/features/articles/useArticles";
+import { useForexRates, useNepseIndex } from "@/features/market/useMarket";
 import { useTheme } from "@/hooks/useTheme";
 import { editions, hasMultipleEditions, site } from "@/constants/site";
 import { fontFamilies, spacing } from "@/theme/tokens";
@@ -21,7 +22,9 @@ import { clockIn, formatDate } from "@/utils/format";
 import type {
   ArticleCard as ArticleCardType,
   Edition,
+  ForexRate,
   HomeFeedData,
+  NepseIndexReading,
 } from "@/types/domain";
 
 import { AppHeader } from "@/components/AppHeader";
@@ -53,6 +56,10 @@ import { CachedNoticeBanner, ErrorState } from "@/components/ErrorState";
  *   - "Investigations" panel (locked teaser or live stories)
  */
 
+/* Stable fallbacks, so a memoised child does not see a new array each render. */
+const EMPTY_RATES: ForexRate[] = [];
+const NO_NEPSE_READING: NepseIndexReading = { index: null, isOpen: false };
+
 export default function HomeScreen() {
   const router = useRouter();
   const { palette, editionSlug } = useTheme();
@@ -69,11 +76,22 @@ export default function HomeScreen() {
   const wireQuery = useInfiniteLatestArticles(12);
   const editionQuery = useEditionArticles(editionSlug, 3);
 
+  /*
+   * Markets load on their own, never in front of the stories: Nepal Rastra
+   * Bank's API alone takes 2–3 s. Each strip appears when its data arrives.
+   */
+  const forexQuery = useForexRates();
+  const nepseQuery = useNepseIndex();
+  const forexRates = forexQuery.data ?? EMPTY_RATES;
+  const nepseReading = nepseQuery.data ?? NO_NEPSE_READING;
+
   const handleRefresh = useCallback(() => {
     void refetch();
     void wireQuery.refetch();
     void editionQuery.refetch();
-  }, [refetch, wireQuery, editionQuery]);
+    void forexQuery.refetch();
+    void nepseQuery.refetch();
+  }, [refetch, wireQuery, editionQuery, forexQuery, nepseQuery]);
 
   // Additional wire stories loaded beyond the initial homepage feed
   const extraWireStories = useMemo(() => {
@@ -182,7 +200,6 @@ export default function HomeScreen() {
     latestGrid,
     latestBriefs,
     categories,
-    nepseReading,
   } = feed;
 
   const editionStories = (editionQuery.data ?? []).filter(
@@ -231,6 +248,7 @@ export default function HomeScreen() {
         ListFooterComponent={
           <HomeFooterSections
             feed={feed}
+            forexRates={forexRates}
             wireQuery={wireQuery}
             editionStories={editionStories}
             activeEdition={activeEdition}
@@ -369,11 +387,13 @@ export default function HomeScreen() {
  */
 function HomeFooterSections({
   feed,
+  forexRates,
   wireQuery,
   editionStories,
   activeEdition,
 }: {
   feed: HomeFeedData;
+  forexRates: ForexRate[];
   wireQuery: ReturnType<typeof useInfiniteLatestArticles>;
   editionStories: ArticleCardType[];
   activeEdition: Edition | undefined;
@@ -385,7 +405,6 @@ function HomeFooterSections({
     trending,
     investigationsCategory,
     investigationStories,
-    forexRates,
   } = feed;
 
   return (

@@ -12,8 +12,6 @@ import {
   FULL_COLUMNS_NE,
 } from "@/constants/config";
 import { getPublicSupabase } from "./supabase";
-import { getForexRates } from "./forex";
-import { getNepseIndex } from "./nepse";
 
 /**
  * Typed data read layer for Inner Circle Nepal Mobile.
@@ -77,7 +75,27 @@ function escapeLikePattern(value: string): string {
 /*  Categories, Tags & Authors                                                 */
 /* -------------------------------------------------------------------------- */
 
-export async function getCategories(): Promise<Category[]> {
+/**
+ * Categories change rarely and several loaders ask for them in the same
+ * moment (the home feed and each desk it fetches). Callers within a minute
+ * share one request; a failure is not remembered.
+ */
+const CATEGORIES_TTL_MS = 60_000;
+let categoriesCache: { at: number; promise: Promise<Category[]> } | null = null;
+
+export function getCategories(): Promise<Category[]> {
+  if (categoriesCache && Date.now() - categoriesCache.at < CATEGORIES_TTL_MS) {
+    return categoriesCache.promise;
+  }
+  const promise = fetchCategories();
+  categoriesCache = { at: Date.now(), promise };
+  promise.catch(() => {
+    if (categoriesCache?.promise === promise) categoriesCache = null;
+  });
+  return promise;
+}
+
+async function fetchCategories(): Promise<Category[]> {
   const sb = getPublicSupabase();
   if (!sb) throw new Error("Supabase is not configured.");
 
@@ -434,25 +452,32 @@ export async function searchArticles(
 /*  Editorial Homepage Composite Feed                                          */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The front page's stories, in one parallel round.
+ *
+ * Every request starts at once: the feed used to wait for exchange rates and
+ * NEPSE (Nepal Rastra Bank's API alone takes 2–3 s) and then fetch the
+ * Immigration and Investigations desks one after the other, so a cold launch
+ * showed placeholders for ~6 s. Markets now load through their own queries
+ * (`useForexRates`, `useNepseIndex`) and fill in when ready, and the desk
+ * lists are fetched alongside everything else. A locked Investigations desk
+ * is dropped after the fact rather than checked first.
+ */
 export async function getHomeFeed(): Promise<HomeFeedData> {
-  const [featured, latest, trending, categories, forexRates, nepseReading] =
+  const [featured, latest, trending, categories, immigration, investigations] =
     await Promise.all([
       getFeaturedArticles(5),
       getLatestArticles(18),
       getTrendingArticles(5),
       getCategories(),
-      getForexRates().catch(() => []),
-      getNepseIndex().catch(() => ({ index: null, isOpen: false })),
+      getArticlesByCategory("immigration", 3).catch(() => []),
+      getArticlesByCategory("investigations", 3).catch(() => []),
     ]);
-
-  const immigration = await getArticlesByCategory("immigration", 3).catch(() => []);
 
   const investigationsCategory =
     categories.find((c) => c.slug === "investigations") ?? null;
   const investigationStories =
-    investigationsCategory && !investigationsCategory.is_locked
-      ? await getArticlesByCategory("investigations", 3).catch(() => [])
-      : [];
+    investigationsCategory && !investigationsCategory.is_locked ? investigations : [];
 
   // Replicate exact homepage editorial curation logic from `site/src/app/(site)/page.tsx`
   const [firstFeatured, ...restFeatured] = featured;
@@ -487,8 +512,6 @@ export async function getHomeFeed(): Promise<HomeFeedData> {
     investigationsCategory,
     investigationStories,
     categories,
-    forexRates,
-    nepseReading,
     fetchedAt: new Date().toISOString(),
   };
 }

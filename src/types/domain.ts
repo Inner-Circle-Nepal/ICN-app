@@ -207,7 +207,5 @@ export interface HomeFeedData {
   investigationsCategory: Category | null;
   investigationStories: ArticleCard[];
   categories: Category[];
-  forexRates: ForexRate[];
-  nepseReading: NepseIndexReading;
   fetchedAt: string;
 }
