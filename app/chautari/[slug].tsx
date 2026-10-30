@@ -27,6 +27,8 @@ import {
   useChautariRoom,
   type RoomMember,
 } from "@/features/chautari/useChautariRoom";
+import { submitContactMessage } from "@/lib/api/newsletter";
+import { getBlockedIdentities, setBlockedIdentities } from "@/lib/storage/chautariBlocks";
 import { isClerkConfigured } from "@/constants/config";
 import { isLiveKitAvailable } from "@/lib/livekit/platform";
 import { useTheme } from "@/hooks/useTheme";
@@ -225,6 +227,82 @@ export default function ChautariRoomScreen() {
       },
     ]);
   }, [slug, leaveAndBack]);
+
+  /*
+   * Report and block — available to everyone in the room, not only the host.
+   *
+   * Blocking is local: the reader stops hearing that person, here and in any
+   * later room, without anyone else being told. Reporting goes to the
+   * newsroom through the same contact pipeline as the Settings form, with
+   * the room and the person's identity attached so a moderator can act.
+   */
+  const [blocked, setBlockedState] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    void getBlockedIdentities().then(setBlockedState);
+  }, []);
+  const setRoomBlocked = room.setBlocked;
+  useEffect(() => {
+    setRoomBlocked(blocked);
+  }, [blocked, setRoomBlocked]);
+
+  const toggleBlock = useCallback((member: RoomMember) => {
+    setBlockedState((prev) => {
+      const next = new Set(prev);
+      if (next.has(member.identity)) next.delete(member.identity);
+      else next.add(member.identity);
+      void setBlockedIdentities(next);
+      return next;
+    });
+  }, []);
+
+  const reporterEmail = user?.primaryEmailAddress?.emailAddress ?? "";
+  const sendReport = useCallback(
+    (member: RoomMember, reason: string) => {
+      void submitContactMessage({
+        name: displayName ?? "Chautari listener",
+        email: reporterEmail,
+        topic: "Chautari report",
+        message: [
+          `Reason: ${reason}`,
+          `Room: ${slug}`,
+          `Reported: ${member.name} (${member.identity})`,
+        ].join("\n"),
+      }).then((res) =>
+        setNotice(
+          res.ok
+            ? "Thank you. The newsroom will review this report within 24 hours."
+            : res.message,
+        ),
+      );
+    },
+    [displayName, reporterEmail, slug],
+  );
+
+  const openSafety = useCallback(
+    (member: RoomMember) => {
+      const isBlocked = blocked.has(member.identity);
+      Alert.alert(member.name, "Report this person to the newsroom, or block them.", [
+        {
+          text: "Report",
+          onPress: () =>
+            Alert.alert("Why are you reporting them?", undefined, [
+              { text: "Abusive or hateful", onPress: () => sendReport(member, "Abusive or hateful") },
+              { text: "Harassment", onPress: () => sendReport(member, "Harassment") },
+              { text: "Spam or scam", onPress: () => sendReport(member, "Spam or scam") },
+              { text: "Something else", onPress: () => sendReport(member, "Something else") },
+              { text: "Cancel", style: "cancel" },
+            ]),
+        },
+        {
+          text: isBlocked ? "Unblock" : "Block",
+          style: isBlocked ? "default" : "destructive",
+          onPress: () => toggleBlock(member),
+        },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    },
+    [blocked, sendReport, toggleBlock],
+  );
 
   /* Split once per member change. `canPublish` is the server's word, not ours. */
   const speakers = useMemo(
@@ -452,6 +530,8 @@ export default function ChautariRoomScreen() {
                       member={m}
                       isHost={isHost}
                       onAct={confirmAct}
+                      blocked={blocked.has(m.identity)}
+                      onSafety={openSafety}
                       localImageUrl={localImageUrl}
                     />
                   ))}
@@ -471,6 +551,8 @@ export default function ChautariRoomScreen() {
             member={item.member}
             isHost={isHost}
             onAct={confirmAct}
+            blocked={blocked.has(item.member.identity)}
+            onSafety={openSafety}
             localImageUrl={localImageUrl}
           />
         )}
@@ -665,23 +747,28 @@ const SpeakerTile = React.memo(function SpeakerTile({
   member: p,
   isHost,
   onAct,
+  blocked,
+  onSafety,
   localImageUrl,
 }: {
   member: RoomMember;
   isHost: boolean;
   onAct: (member: RoomMember, action: ModerationAction) => void;
+  /** The reader has blocked this person and is not hearing them. */
+  blocked: boolean;
+  onSafety: (member: RoomMember) => void;
   /** The reader's own picture, or null. Ignored for every other member. */
   localImageUrl: string | null;
 }) {
   const { palette } = useTheme();
   /* Drawn only from LiveKit's own audio activity. Never decorative. */
-  const speaking = p.isSpeaking && !p.isMuted;
-  const label = stateLabel(p, speaking);
+  const speaking = p.isSpeaking && !p.isMuted && !blocked;
+  const label = blocked ? "Blocked" : stateLabel(p, speaking);
 
   return (
     <View
       style={styles.tile}
-      accessible
+      accessible={p.isLocal}
       accessibilityLabel={`${p.name}${p.isLocal ? ", you" : ""}. ${label}.`}
     >
       <Avatar
@@ -697,12 +784,17 @@ const SpeakerTile = React.memo(function SpeakerTile({
         {label}
       </Text>
 
-      {/* Host controls never appear against the host's own tile. */}
-      {isHost && !p.isLocal ? (
+      {/* No controls against your own tile. Host controls only for the host. */}
+      {!p.isLocal ? (
         <View style={styles.tileActions}>
-          <HostAction label="Mute" onPress={() => onAct(p, "mute")} />
-          <HostAction label="Demote" onPress={() => onAct(p, "demote_speaker")} />
-          <HostAction label="Remove" danger onPress={() => onAct(p, "remove")} />
+          {isHost ? (
+            <>
+              <HostAction label="Mute" onPress={() => onAct(p, "mute")} />
+              <HostAction label="Demote" onPress={() => onAct(p, "demote_speaker")} />
+              <HostAction label="Remove" danger onPress={() => onAct(p, "remove")} />
+            </>
+          ) : null}
+          <HostAction label="Report / Block" onPress={() => onSafety(p)} />
         </View>
       ) : null}
     </View>
@@ -720,21 +812,26 @@ const PersonRowView = React.memo(function PersonRowView({
   member: p,
   isHost,
   onAct,
+  blocked,
+  onSafety,
   localImageUrl,
 }: {
   member: RoomMember;
   isHost: boolean;
   onAct: (member: RoomMember, action: ModerationAction) => void;
+  /** The reader has blocked this person and is not hearing them. */
+  blocked: boolean;
+  onSafety: (member: RoomMember) => void;
   /** The reader's own picture, or null. Ignored for every other member. */
   localImageUrl: string | null;
 }) {
   const { palette } = useTheme();
-  const label = stateLabel(p, false);
+  const label = blocked ? "Blocked" : stateLabel(p, false);
 
   return (
     <View
       style={[styles.person, { borderBottomColor: palette.rule }]}
-      accessible={!isHost || p.isLocal}
+      accessible={p.isLocal}
       accessibilityLabel={`${p.name}${p.isLocal ? ", you" : ""}. ${label}.`}
     >
       <Avatar
@@ -750,10 +847,15 @@ const PersonRowView = React.memo(function PersonRowView({
         <Text style={[styles.personMeta, { color: palette.quiet }]}>{label}</Text>
       </View>
 
-      {isHost && !p.isLocal ? (
+      {!p.isLocal ? (
         <View style={styles.actions}>
-          <HostAction label="Invite" onPress={() => onAct(p, "approve_speaker")} />
-          <HostAction label="Remove" danger onPress={() => onAct(p, "remove")} />
+          {isHost ? (
+            <>
+              <HostAction label="Invite" onPress={() => onAct(p, "approve_speaker")} />
+              <HostAction label="Remove" danger onPress={() => onAct(p, "remove")} />
+            </>
+          ) : null}
+          <HostAction label="Report / Block" onPress={() => onSafety(p)} />
         </View>
       ) : null}
     </View>

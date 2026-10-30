@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -238,6 +239,21 @@ export default function SignInScreen() {
         <Text style={[styles.legal, { color: palette.quiet }]}>
           We use your address to sign you in and nothing else. No password is
           stored on this device.
+        </Text>
+
+        {/* App Store guideline 1.2: accounts that can post must accept the terms. */}
+        <Text style={[styles.legal, { color: palette.quiet, marginTop: 12 }]}>
+          By continuing you agree to the{" "}
+          <Text
+            style={styles.link}
+            accessibilityRole="link"
+            onPress={() => void Linking.openURL("https://icn.news/terms")}
+          >
+            Terms of Use
+          </Text>
+          . Chautari has no tolerance for abusive, hateful or harassing speech: anyone can report
+          or block a participant, and the newsroom reviews every report within 24 hours and
+          removes offending users.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -774,6 +774,29 @@ describe("participants", () => {
     await unmount();
   });
 
+  it("stops receiving a blocked participant's audio, and resumes on unblock", async () => {
+    const room = await connectedRoom();
+    const pub = { isMuted: false, isDesired: true, setSubscribed: vi.fn() };
+    room.remoteParticipants.set(
+      "a",
+      participant({
+        identity: "a",
+        permissions: { canPublish: true },
+        audioTrackPublications: new Map([["t", pub]]),
+      }),
+    );
+    await act(async () => room.emit(RoomEvent.ParticipantConnected));
+    expect(pub.setSubscribed).not.toHaveBeenCalled();
+
+    await act(async () => state().setBlocked(new Set(["a"])));
+    expect(pub.setSubscribed).toHaveBeenLastCalledWith(false);
+
+    pub.isDesired = false;
+    await act(async () => state().setBlocked(new Set()));
+    expect(pub.setSubscribed).toHaveBeenLastCalledWith(true);
+    await unmount();
+  });
+
   it("does not notify React at all when nothing changed", async () => {
     const room = await connectedRoom();
     room.remoteParticipants.set("a", participant({ identity: "a" }));

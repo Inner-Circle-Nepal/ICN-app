@@ -98,6 +98,27 @@ export interface ChautariRoomState {
   leave: () => void;
   toggleMic: () => void;
   retry: () => void;
+  /** Stop hearing these identities. The screen owns persistence. */
+  setBlocked: (identities: ReadonlySet<string>) => void;
+}
+
+/**
+ * Stop receiving audio from blocked participants, and resume it on unblock.
+ *
+ * Unsubscribing rather than turning the volume down: nothing from a blocked
+ * person is downloaded or decoded, and it works the same on every platform.
+ * Called from every member sync, so a track published after the block, or by
+ * someone who rejoined, is caught as soon as the room reports it.
+ */
+function applyBlocks(room: Room, blocked: ReadonlySet<string>): void {
+  for (const p of room.remoteParticipants.values()) {
+    const wanted = !blocked.has(p.identity);
+    for (const pub of p.audioTrackPublications.values()) {
+      /* Only touch a publication whose subscription is actually wrong. */
+      const isDesired = pub.isDesired !== false;
+      if (isDesired !== wanted) pub.setSubscribed(wanted);
+    }
+  }
 }
 
 /**
@@ -280,6 +301,9 @@ export function useChautariRoom(
   /** Previous members, so unchanged rows keep their object identity. */
   const membersRef = useRef<RoomMember[]>([]);
 
+  /** Identities the reader has blocked; read on every sync. */
+  const blockedRef = useRef<ReadonlySet<string>>(new Set());
+
   /**
    * Rebuild the member list, reusing objects for anyone who did not change.
    *
@@ -290,6 +314,7 @@ export function useChautariRoom(
    * state actually changed get a new object now.
    */
   const syncMembers = useCallback((room: Room) => {
+    applyBlocks(room, blockedRef.current);
     const next: RoomMember[] = [
       toMember(room.localParticipant, true),
       ...[...room.remoteParticipants.values()].map((p: RemoteParticipant) => toMember(p, false)),
@@ -520,6 +545,11 @@ export function useChautariRoom(
   /* Never leave a connection, or a microphone, running past the screen. */
   useEffect(() => () => void teardown(), [teardown]);
 
+  const setBlocked = useCallback((identities: ReadonlySet<string>) => {
+    blockedRef.current = identities;
+    if (roomRef.current) applyBlocks(roomRef.current, identities);
+  }, []);
+
   return {
     phase,
     error,
@@ -542,6 +572,7 @@ export function useChautariRoom(
     leave,
     toggleMic,
     retry,
+    setBlocked,
   };
 }
 
