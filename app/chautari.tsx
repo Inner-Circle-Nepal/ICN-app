@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useMemo } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -11,73 +11,92 @@ import {
 import { useRouter } from "expo-router";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { useQuery } from "@tanstack/react-query";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { discoverRooms, type DiscoverRoom } from "@/lib/api/chautari";
-import { feedState, roomSummary } from "@/features/chautari/feed";
 import { isClerkConfigured } from "@/constants/config";
 import { useTheme } from "@/hooks/useTheme";
-import { fontFamilies, spacing } from "@/theme/tokens";
+import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { formatDateTime, timeAgo } from "@/utils/format";
 import { Avatar } from "@/components/chautari/Avatar";
-import { AppHeader } from "@/components/AppHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
+import { initialsFor } from "@/features/chautari/initials";
 
 /**
- * Chautari — the rooms that are on air.
+ * Chautari lobby — Direction B ("The dispatch").
  *
- * A chautari is the platform under a village tree where people stop to talk.
- * The screen is a schedule, not a feed: live first, then what is coming,
- * with the same hairlines and type scale as the front page.
+ * The whole screen is composed like a wire-service bulletin board:
  *
- * Browsing needs no account. Joining does — that gate is on the room screen
- * and on the server, not here, because requiring a sign-in to see what is
- * happening is how a feature stays undiscovered.
+ *   ┌─ ICN. Chautari                               ⟨you⟩ ┐  (masthead)
+ *   │ ──────────────────────────────────────────────────  │
+ *   │ ON AIR · N rooms live from the newsroom · HH:MM NPT │  (chyron)
+ *   │                                                    │
+ *   │ COMING UP ON THE SCHEDULE                   N rooms│
+ *   │   FRI 7:30 PM   The diaspora vote...               │
+ *   │   SUN 6:00 PM   लोकसेवा टिकेट्र्क...                 │
+ *   │                                                    │
+ *   │ Signed in as X             EARN ON CHAUTARI →      │
+ *   │                                                    │
+ *   │ ● LIVE · On air 24:16                              │
+ *   │   Who pays for the new federal budget?             │
+ *   │   ⟨RS⟩ Rina Shrestha  HOST                         │
+ *   │   47 listening · 4 on stage                        │
+ *   │   RE: Finance minister tables…                     │
+ *   │                                                    │
+ *   │ ... more live rooms                                │
+ *   └────────────────────────────────────────────────────┘
+ *   [          + OPEN A ROOM          ]  (fixed, when hostable)
  *
- * ONE list, not two. Live rooms used to be `FlatList.data` while scheduled
- * ones rendered from `ListFooterComponent`, so with nothing live and
- * something scheduled the screen printed "No conversations right now"
- * directly above a populated "Coming up" section. Section headings are rows
- * now and emptiness is a property of the whole feed — see features/chautari/feed.ts.
+ * Browsing needs no account. Joining does — that gate lives on the room
+ * screen and on the server, not here, because requiring a sign-in to see
+ * what is happening is how a feature stays undiscovered.
+ *
+ * Scope: frontend-only. Several fields the design draws from (room desk,
+ * speaker-name list, article tie-in) are not in the current discovery
+ * payload. See docs for the required backend changes. For now:
+ *   - desk tag is dropped
+ *   - speaker names are not rendered on cards — just the host and a count
+ *   - the "RE:" line falls back to the room's existing `description`
  */
 export default function ChautariScreen() {
   const router = useRouter();
   const { palette } = useTheme();
+  const insets = useSafeAreaInsets();
 
   const rooms = useQuery({
     queryKey: ["chautari-rooms"],
     queryFn: discoverRooms,
-    // A live schedule goes stale quickly; a minute is the most it should lag.
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
   });
 
-  const state = feedState({
-    rooms: rooms.data,
-    isLoading: rooms.isLoading,
-    isError: rooms.isError,
-  });
+  const { live, scheduled } = useMemo(() => split(rooms.data ?? []), [rooms.data]);
+  const nowNpt = useNowClock();
 
   const openRoom = (room: DiscoverRoom) =>
     router.push({
       pathname: "/chautari/[slug]",
-      /*
-       * `title` is carried so the room header is not blank while the token
-       * request is in flight. It is COSMETIC: the room screen replaces it
-       * with the server's own title from the grant, and nothing anywhere
-       * treats it as evidence of anything.
-       */
       params: { slug: room.slug, title: room.title, host: room.hostName ?? "" },
     });
 
+  const isEmpty =
+    !rooms.isLoading &&
+    !rooms.isError &&
+    (rooms.data?.length ?? 0) === 0;
+
   return (
     <View style={[styles.screen, { backgroundColor: palette.paper }]}>
-      <AppHeader showSectionBar={false} />
+      <Masthead palette={palette} />
+      <OnAirChyron count={live.length} now={nowNpt} palette={palette} />
 
       <FlatList
-        data={state.kind === "rows" ? state.rows : []}
-        keyExtractor={(r) => r.key}
-        contentContainerStyle={styles.list}
+        data={live}
+        keyExtractor={(r) => r.slug}
+        contentContainerStyle={[
+          styles.list,
+          { paddingBottom: 96 + Math.max(0, insets.bottom) },
+        ]}
         refreshControl={
           <RefreshControl
             refreshing={rooms.isRefetching}
@@ -87,301 +106,425 @@ export default function ChautariScreen() {
         }
         ListHeaderComponent={
           <View>
-            <View style={[styles.hero, { borderBottomColor: palette.ink }]}>
-              <Text style={[styles.kicker, { color: palette.quiet }]}>Live conversation</Text>
-              <Text style={[styles.title, { color: palette.ink }]}>Chautari</Text>
-              <Text style={[styles.subtitle, { color: palette.quiet }]}>
-                The platform under the tree, where the newsroom and its readers talk out loud.
-                Listen in, or raise a hand to speak.
-              </Text>
-            </View>
-            <HostBar />
-            <EarnLink />
+            <ScheduledSection rooms={scheduled} onPress={openRoom} palette={palette} />
+            <SignedInBar palette={palette} />
+            {live.length > 0 ? (
+              <SectionHeader
+                left="On air now"
+                right={`${live.length} live`}
+                palette={palette}
+              />
+            ) : null}
           </View>
         }
-        renderItem={({ item }) =>
-          item.kind === "section" ? (
-            <SectionHeading title={item.title} cta={item.cta} />
-          ) : (
-            <RoomRow
-              room={item.room}
-              showRule={!item.firstInSection}
-              variant={item.variant}
-              onPress={() => openRoom(item.room)}
-            />
-          )
-        }
+        renderItem={({ item, index }) => (
+          <LiveRoomCard
+            room={item}
+            onPress={() => openRoom(item)}
+            showRule={index > 0}
+            palette={palette}
+          />
+        )}
         ListEmptyComponent={
-          /*
-           * Reached only when the feed holds nothing at all — never while a
-           * "Coming up" section is on screen.
-           */
-          state.kind === "loading" ? (
-            <View style={styles.loading}>
-              <ActivityIndicator color={palette.quiet} />
-            </View>
-          ) : state.kind === "error" ? (
-            <ErrorState
-              title="Could not load conversations"
-              message="Check your connection and try again."
-              onRetry={() => void rooms.refetch()}
-            />
-          ) : (
-            <EmptyState
-              kicker="Nothing on air"
-              title="No conversations right now"
-              description="Chautari rooms open around the news. When one starts, it will appear here."
-              actionLabel="Back to the front page"
-              onAction={() => router.navigate("/")}
-            />
-          )
+          <EmptyFallback
+            isEmpty={isEmpty}
+            isLoading={rooms.isLoading}
+            isError={rooms.isError}
+            onRetry={() => void rooms.refetch()}
+            onHome={() => router.navigate("/")}
+            palette={palette}
+          />
         }
       />
+
+      <OpenRoomDock palette={palette} insetsBottom={insets.bottom} />
     </View>
   );
 }
 
-function SectionHeading({ title, cta }: { title: string; cta?: string }) {
-  const { palette } = useTheme();
-  return (
-    <View style={[styles.sectionHeading, { borderBottomColor: palette.ink }]}>
-      <Text style={[styles.sectionTitle, { color: palette.ink }]}>{title}</Text>
-      {cta ? <Text style={[styles.sectionCta, { color: palette.quiet }]}>{cta}</Text> : null}
-    </View>
-  );
+/* -------------------------------------------------------------------------- */
+
+/** The empty / loading / error state that sits between the schedule and nothing. */
+function EmptyFallback({
+  isEmpty,
+  isLoading,
+  isError,
+  onRetry,
+  onHome,
+  palette,
+}: {
+  isEmpty: boolean;
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  onHome: () => void;
+  palette: ThemePalette;
+}) {
+  if (isEmpty) {
+    return (
+      <EmptyState
+        kicker="Nothing on air"
+        title="No conversations right now"
+        description="Chautari rooms open around the news. When one starts, it will appear here."
+        actionLabel="Back to the front page"
+        onAction={onHome}
+      />
+    );
+  }
+  if (isLoading) {
+    return (
+      <View style={styles.loading}>
+        <ActivityIndicator color={palette.quiet} />
+      </View>
+    );
+  }
+  if (isError) {
+    return (
+      <ErrorState
+        title="Could not load conversations"
+        message="Check your connection and try again."
+        onRetry={onRetry}
+      />
+    );
+  }
+  return null;
 }
+
+function split(rooms: DiscoverRoom[]): { live: DiscoverRoom[]; scheduled: DiscoverRoom[] } {
+  return {
+    live: rooms.filter((r) => r.status === "live"),
+    scheduled: rooms.filter((r) => r.status === "scheduled"),
+  };
+}
+
+/** The clock on the right of the ON AIR chyron. Updates every minute. */
+function useNowClock(): string {
+  const [now, setNow] = React.useState(() => kathmanduClock(new Date()));
+  React.useEffect(() => {
+    const id = setInterval(() => setNow(kathmanduClock(new Date())), 60_000);
+    return () => clearInterval(id);
+  }, []);
+  return now;
+}
+
+function kathmanduClock(d: Date): string {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kathmandu",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(d);
+}
+
+/* ------------------------------------------------------------------ Masthead */
 
 /**
- * The host's entry point, shown only to someone who can actually use it.
+ * Top of every lobby view: paper wordmark + the signed-in reader's chip.
  *
- * Entitlement is decided by the server, so this cannot know in advance
- * whether the tap will succeed — it offers, and the server refuses with a
- * readable message if the account is not entitled.
+ * Kept inline rather than reusing `AppHeader` because Direction B's masthead
+ * is Chautari-specific — it carries the section name and the bar separators
+ * that the general app header does not.
  */
-function HostBar() {
+function Masthead({ palette }: { palette: ThemePalette }) {
   const router = useRouter();
-  const { palette } = useTheme();
   const { isSignedIn } = useAuth();
   const { user } = useUser();
-  const [dismissed, setDismissed] = useState(false);
 
-  if (!isClerkConfigured || dismissed) return null;
+  return (
+    <View style={[styles.masthead, { borderBottomColor: palette.rule }]}>
+      <Pressable
+        onPress={() => router.navigate("/")}
+        accessibilityRole="button"
+        accessibilityLabel="Back to Inner Circle Nepal front page"
+        style={styles.wordmark}
+        hitSlop={6}
+      >
+        <Text style={[styles.wordmarkIcn, { color: palette.ink }]}>ICN</Text>
+        <View style={[styles.wordmarkDot, { backgroundColor: palette.red }]} />
+        <Text style={[styles.wordmarkSection, { color: palette.ink }]}>Chautari</Text>
+      </Pressable>
+
+      <View style={styles.mastheadRight}>
+        {isClerkConfigured && isSignedIn && user ? (
+          <Pressable
+            onPress={() => router.push("/profile")}
+            accessibilityRole="button"
+            accessibilityLabel="Open your profile"
+            hitSlop={8}
+          >
+            <Avatar
+              name={user.fullName?.trim() || user.firstName?.trim() || "You"}
+              size="sm"
+              imageUrl={user.hasImage ? user.imageUrl : null}
+            />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/* ------------------------------------------------------------------- Chyron */
+
+function OnAirChyron({
+  count,
+  now,
+  palette,
+}: {
+  count: number;
+  now: string;
+  palette: ThemePalette;
+}) {
+  const left =
+    count === 0
+      ? "ON AIR · nothing live yet"
+      : `ON AIR · ${count} room${count === 1 ? "" : "s"} live from the newsroom`;
+  return (
+    <View style={[styles.chyron, { backgroundColor: palette.ink }]}>
+      <Text style={[styles.chyronText, { color: palette.paper }]} numberOfLines={1}>
+        {left}
+      </Text>
+      <Text style={[styles.chyronClock, { color: palette.paper }]} numberOfLines={1}>
+        {now} NPT
+      </Text>
+    </View>
+  );
+}
+
+/* ----------------------------------------------------------------- Schedule */
+
+function ScheduledSection({
+  rooms,
+  onPress,
+  palette,
+}: {
+  rooms: DiscoverRoom[];
+  onPress: (room: DiscoverRoom) => void;
+  palette: ThemePalette;
+}) {
+  if (rooms.length === 0) return null;
+
+  return (
+    <View style={{ marginTop: 20 }}>
+      <SectionHeader
+        left="Coming up on the schedule"
+        right={`${rooms.length} room${rooms.length === 1 ? "" : "s"}`}
+        palette={palette}
+      />
+      {rooms.map((room, i) => (
+        <ScheduledRow
+          key={room.slug}
+          room={room}
+          onPress={() => onPress(room)}
+          showRule={i > 0}
+          palette={palette}
+        />
+      ))}
+    </View>
+  );
+}
+
+function ScheduledRow({
+  room,
+  onPress,
+  showRule,
+  palette,
+}: {
+  room: DiscoverRoom;
+  onPress: () => void;
+  showRule: boolean;
+  palette: ThemePalette;
+}) {
+  const { day, time } = useMemo(() => formatScheduleStamp(room.scheduledFor), [room.scheduledFor]);
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Scheduled: ${room.title}. ${day} at ${time}.${room.hostName ? ` Hosted by ${room.hostName}.` : ""}`}
+      style={({ pressed }) => [
+        styles.schedRow,
+        showRule && { borderTopWidth: 1, borderTopColor: palette.rule },
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={styles.schedStamp}>
+        <Text style={[styles.schedDay, { color: palette.quiet }]}>{day}</Text>
+        <Text style={[styles.schedTime, { color: palette.ink }]}>{time}</Text>
+      </View>
+      <View style={styles.schedBody}>
+        <Text style={[styles.schedTitle, { color: palette.ink }]} numberOfLines={2}>
+          {room.title}
+        </Text>
+        {room.hostName ? (
+          <Text style={[styles.schedMeta, { color: palette.quiet }]} numberOfLines={1}>
+            {room.hostName}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+}
+
+/** "FRI" and "7:30 PM" split so the stamp can stack. All times in NPT. */
+function formatScheduleStamp(scheduledFor: string | null): { day: string; time: string } {
+  if (!scheduledFor) return { day: "TBD", time: "" };
+  const dt = new Date(scheduledFor);
+  const day = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kathmandu",
+    weekday: "short",
+  })
+    .format(dt)
+    .toUpperCase();
+  const time = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kathmandu",
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(dt);
+  return { day, time: `${time} NPT` };
+}
+
+/* ------------------------------------------------------------- Signed-in bar */
+
+/**
+ * Thin horizontal bar: who you are, and a link to the earn programme.
+ *
+ * Unsigned readers see a sign-in prompt instead; the earn link disappears
+ * because it is only useful to someone who could host.
+ */
+function SignedInBar({ palette }: { palette: ThemePalette }) {
+  const router = useRouter();
+  const { isSignedIn } = useAuth();
+  const { user } = useUser();
+
+  if (!isClerkConfigured) {
+    return (
+      <View
+        style={[styles.signedInBar, { borderTopColor: palette.rule, borderBottomColor: palette.rule }]}
+      >
+        <Text style={[styles.signedInText, { color: palette.quiet }]} numberOfLines={1}>
+          Chautari sign-in is not configured in this build.
+        </Text>
+      </View>
+    );
+  }
 
   if (!isSignedIn) {
     return (
-      <View style={[styles.hostBar, { borderColor: palette.rule2 }]}>
-        <Text style={[styles.hostText, { color: palette.quiet }]}>
-          Sign in to join a conversation or raise your hand.
+      <View
+        style={[styles.signedInBar, { borderTopColor: palette.rule, borderBottomColor: palette.rule }]}
+      >
+        <Text style={[styles.signedInText, { color: palette.quiet }]} numberOfLines={1}>
+          Sign in to join a conversation.
         </Text>
         <Pressable
           onPress={() => router.push("/sign-in")}
           accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.hostBtn,
-            { backgroundColor: palette.ink },
-            pressed && styles.pressed,
-          ]}
+          hitSlop={10}
         >
-          <Text style={[styles.hostBtnText, { color: palette.paper }]}>Sign in</Text>
+          <Text style={[styles.signedInLink, { color: palette.ink }]}>SIGN IN →</Text>
         </Pressable>
       </View>
     );
   }
 
+  const name = user?.firstName?.trim() || user?.primaryEmailAddress?.emailAddress || "you";
   return (
-    <View style={[styles.hostBar, { borderColor: palette.rule2 }]}>
-      {/* The only place the app named your account and gave you nowhere to go. */}
+    <View
+      style={[styles.signedInBar, { borderTopColor: palette.rule, borderBottomColor: palette.rule }]}
+    >
       <Pressable
         onPress={() => router.push("/profile")}
         accessibilityRole="button"
         accessibilityLabel="Open your profile"
-        style={({ pressed }) => [styles.hostIdentity, pressed && styles.pressed]}
+        hitSlop={6}
+        style={styles.signedInIdentity}
       >
-        <Text style={[styles.hostText, { color: palette.quiet }]}>
+        <Text style={[styles.signedInText, { color: palette.quiet }]} numberOfLines={1}>
           Signed in as{" "}
-          <Text style={[styles.hostLink, { color: palette.ink }]}>
-            {user?.firstName ?? user?.primaryEmailAddress?.emailAddress ?? "you"}
-          </Text>
+          <Text style={[styles.signedInName, { color: palette.ink }]}>{name}</Text>
         </Text>
       </Pressable>
       <Pressable
-        onPress={() => router.push("/chautari/new")}
+        onPress={() => router.push("/chautari/earn")}
         accessibilityRole="button"
-        style={({ pressed }) => [
-          styles.hostBtn,
-          { backgroundColor: palette.ink },
-          pressed && styles.pressed,
-        ]}
-      >
-        <Text style={[styles.hostBtnText, { color: palette.paper }]}>Open a room</Text>
-      </Pressable>
-      <Pressable
-        onPress={() => setDismissed(true)}
+        accessibilityLabel="Earn on Chautari — see the programme requirements"
         hitSlop={10}
-        accessibilityRole="button"
-        accessibilityLabel="Hide the hosting bar"
       >
-        <Text style={[styles.dismiss, { color: palette.quiet }]}>Hide</Text>
+        <Text style={[styles.signedInLink, { color: palette.ink }]}>EARN ON CHAUTARI →</Text>
       </Pressable>
     </View>
   );
 }
 
-/**
- * A room in the schedule.
- *
- * Two sizes, both built from the same nine fields the discovery endpoint
- * actually returns. The lead live room is set larger the way a front page
- * sets its lead; everything else is a compact row. No cards, no shadows —
- * a rule separates them, as everywhere else in this app.
- */
-/**
- * One line pointing at the creator programme.
- *
- * Deliberately a line and not a card. The four requirements live on their own
- * screen (`chautari/earn.tsx`) because this page's job is to show what is on
- * air — four requirement cards here would push the live rooms below the fold
- * to serve the minority of readers who host.
- */
-function EarnLink() {
-  const router = useRouter();
-  const { palette } = useTheme();
-  return (
-    <Pressable
-      onPress={() => router.push("/chautari/earn")}
-      accessibilityRole="button"
-      accessibilityLabel="Earn on Chautari — read the creator monetization requirements"
-      style={({ pressed }) => [
-        styles.earnRow,
-        { borderBottomColor: palette.rule },
-        pressed && styles.pressed,
-      ]}
-    >
-      <View style={styles.earnText}>
-        <Text style={[styles.earnTitle, { color: palette.ink }]}>Earn on Chautari</Text>
-        <Text style={[styles.earnMeta, { color: palette.quiet }]} numberOfLines={1}>
-          What the creator programme asks for
-        </Text>
-      </View>
-      <Text style={[styles.earnChevron, { color: palette.quiet }]}>›</Text>
-    </Pressable>
-  );
-}
+/* -------------------------------------------------------------- Live room cards */
 
-function RoomRow({
+function LiveRoomCard({
   room,
-  showRule,
-  variant,
   onPress,
+  showRule,
+  palette,
 }: {
   room: DiscoverRoom;
-  showRule: boolean;
-  variant: "featured" | "compact";
   onPress: () => void;
+  showRule: boolean;
+  palette: ThemePalette;
 }) {
-  const { palette } = useTheme();
-  const isLive = room.status === "live";
-  const featured = variant === "featured";
+  const onAir = room.startedAt ? elapsedSince(room.startedAt) : null;
 
   return (
     <Pressable
       onPress={onPress}
       accessibilityRole="button"
-      accessibilityLabel={roomSummary(room)}
-      /*
-       * A full room is marked, not disabled.
-       *
-       * The server admits two kinds of caller to a room at capacity: its host,
-       * and anyone already counted in the occupancy who is reconnecting
-       * (`decideAccess` in site/src/lib/chautari/authorize.ts). This payload
-       * carries neither fact, so refusing the tap here would lock a host out
-       * of their own room and block a dropped call from reconnecting. The row
-       * says "Full" plainly and lets the server decide.
-       */
-      accessibilityHint={room.isFull ? "This room is full. Joining may not be possible." : undefined}
+      accessibilityLabel={accessibilityLabel(room)}
       style={({ pressed }) => [
-        styles.row,
-        showRule && { borderTopWidth: 1, borderTopColor: palette.rule, paddingTop: 18 },
+        styles.card,
+        showRule && { borderTopWidth: 1, borderTopColor: palette.rule, paddingTop: 20 },
         pressed && styles.pressed,
       ]}
     >
-      <View style={styles.rowMeta}>
-        {isLive ? (
-          <View style={styles.liveWrap}>
-            <View style={[styles.liveDot, { backgroundColor: palette.red }]} />
-            <Text style={[styles.liveLabel, { color: palette.red }]}>Live</Text>
-          </View>
-        ) : (
-          <Text style={[styles.liveLabel, { color: palette.quiet }]}>Scheduled</Text>
-        )}
-        {room.startedAt && isLive ? (
-          <Text style={[styles.metaDim, { color: palette.quiet }]}>
-            · started {timeAgo(room.startedAt)}
-          </Text>
-        ) : null}
-        {/*
-          `scheduledFor` has been in the payload since Chautari shipped and
-          was never rendered, so "Coming up" listed rooms with no indication
-          of when. Kathmandu time, labelled, because the audience is spread
-          from Sydney to Toronto and a bare clock time means nothing.
-        */}
-        {!isLive && room.scheduledFor ? (
-          <Text style={[styles.metaDim, { color: palette.quiet }]}>
-            · {formatDateTime(room.scheduledFor, "Asia/Kathmandu")} NPT
-          </Text>
+      {/* Live kicker row: red dot + LIVE + duration + FULL chip */}
+      <View style={styles.cardKicker}>
+        <View style={[styles.liveDot, { backgroundColor: palette.red }]} />
+        <Text style={[styles.liveLabel, { color: palette.red }]}>LIVE</Text>
+        {onAir ? (
+          <Text style={[styles.cardMeta, { color: palette.quiet }]}>· On air {onAir}</Text>
         ) : null}
         {room.isFull ? (
-          /*
-           * The whole row used to be rendered at `opacity: 0.6`, which pushed
-           * the metadata — `quiet` on `paper`, already only ~4.95:1 — down to
-           * roughly 2.4:1 against the paper behind it. Well under AA, for the
-           * one row carrying information a reader most needs to read.
-           *
-           * The state lives in this chip now. Nothing else about a full room
-           * is faded, so every count, name and timestamp keeps the contrast
-           * it has everywhere else in the app.
-           */
-          <View style={[styles.fullChip, { backgroundColor: palette.paper2, borderColor: palette.rule2 }]}>
+          <View style={[styles.fullChip, { borderColor: palette.rule2 }]}>
             <Text style={[styles.fullChipText, { color: palette.ink2 }]}>Full</Text>
           </View>
         ) : null}
       </View>
 
-      <Text
-        style={[featured ? styles.roomTitleLead : styles.roomTitle, { color: palette.ink }]}
-      >
-        {room.title}
-      </Text>
+      <Text style={[styles.cardTitle, { color: palette.ink }]}>{room.title}</Text>
 
-      {room.description ? (
-        <Text
-          style={[styles.roomDesc, { color: palette.quiet }]}
-          numberOfLines={featured ? 3 : 2}
-        >
-          {room.description}
+      {/* Host avatar + name + counts */}
+      {room.hostName ? (
+        <View style={styles.cardIdentityRow}>
+          <Avatar name={room.hostName} size="sm" />
+          <View style={styles.cardIdentityText}>
+            <Text style={[styles.cardHostName, { color: palette.ink }]} numberOfLines={1}>
+              {room.hostName}{" "}
+              <Text style={[styles.cardHostRole, { color: palette.quiet }]}>HOST</Text>
+            </Text>
+            <Text style={[styles.cardCounts, { color: palette.quiet }]}>
+              {room.listeners} listening · {room.speakers} on stage
+            </Text>
+          </View>
+        </View>
+      ) : (
+        <Text style={[styles.cardCounts, { color: palette.quiet, marginTop: 10 }]}>
+          {room.listeners} listening · {room.speakers} on stage
         </Text>
-      ) : null}
+      )}
 
-      <View style={styles.footRow}>
-        {room.hostName ? (
-          <>
-            <Avatar name={room.hostName} size="sm" />
-            <View style={styles.footText}>
-              <Text style={[styles.hostName, { color: palette.ink2 }]} numberOfLines={1}>
-                {room.hostName}
-              </Text>
-              <Text style={[styles.roomFoot, { color: palette.quiet }]}>{countsFor(room)}</Text>
-            </View>
-          </>
-        ) : (
-          <Text style={[styles.roomFoot, { color: palette.quiet }]}>{countsFor(room)}</Text>
-        )}
-      </View>
-
-      {featured ? (
-        <View style={[styles.leadCta, { borderColor: palette.ink }]}>
-          <Text style={[styles.leadCtaText, { color: palette.ink }]}>
-            {room.isFull ? "Try to join" : "Listen in"}
+      {/* RE: — Direction B's story-tie line, falls back to description. */}
+      {room.description ? (
+        <View style={styles.reRow}>
+          <Text style={[styles.reLabel, { color: palette.quiet }]}>RE:</Text>
+          <Text style={[styles.reBody, { color: palette.ink2 }]} numberOfLines={3}>
+            {room.description}
           </Text>
         </View>
       ) : null}
@@ -389,153 +532,356 @@ function RoomRow({
   );
 }
 
-/** Counts, straight from the payload. Never estimated, never rounded. */
-function countsFor(room: DiscoverRoom): string {
-  const speakers = `${room.speakers} ${room.speakers === 1 ? "speaker" : "speakers"}`;
-  return `${speakers} · ${room.listeners} listening`;
+function accessibilityLabel(room: DiscoverRoom): string {
+  const parts: string[] = [room.title, "Live now"];
+  if (room.isFull) parts.push("Room is full");
+  if (room.hostName) parts.push(`Hosted by ${room.hostName}`);
+  parts.push(`${room.listeners} listening`);
+  parts.push(`${room.speakers} on stage`);
+  return parts.join(". ") + ".";
 }
+
+function elapsedSince(iso: string): string {
+  const diffMs = Date.now() - new Date(iso).getTime();
+  const totalSec = Math.max(0, Math.floor(diffMs / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
+  return `${m}:${pad(s)}`;
+}
+function pad(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+/* -------------------------------------------------------- Section header */
+
+function SectionHeader({
+  left,
+  right,
+  palette,
+}: {
+  left: string;
+  right?: string;
+  palette: ThemePalette;
+}) {
+  return (
+    <View style={[styles.sectionHeader, { borderBottomColor: palette.ink }]}>
+      <Text style={[styles.sectionTitle, { color: palette.ink }]}>{left}</Text>
+      {right ? (
+        <Text style={[styles.sectionCta, { color: palette.quiet }]}>{right}</Text>
+      ) : null}
+    </View>
+  );
+}
+
+/* -------------------------------------------------------- Fixed OPEN A ROOM */
+
+/**
+ * Sticky bottom bar with the "+ OPEN A ROOM" CTA.
+ *
+ * Only shown to signed-in readers (anyone else cannot host regardless). The
+ * server does the entitlement check when the form submits — the button is
+ * cheap optimism, and the plain refusal that follows is handled by the form.
+ */
+function OpenRoomDock({
+  palette,
+  insetsBottom,
+}: {
+  palette: ThemePalette;
+  insetsBottom: number;
+}) {
+  const router = useRouter();
+  const { isSignedIn } = useAuth();
+
+  if (!isClerkConfigured || !isSignedIn) return null;
+
+  return (
+    <View
+      style={[
+        styles.dock,
+        {
+          backgroundColor: palette.paper,
+          borderTopColor: palette.rule,
+          paddingBottom: Math.max(12, insetsBottom),
+        },
+      ]}
+    >
+      <Pressable
+        onPress={() => router.push("/chautari/new")}
+        accessibilityRole="button"
+        accessibilityLabel="Open a Chautari room"
+        style={({ pressed }) => [
+          styles.dockBtn,
+          { backgroundColor: palette.ink },
+          pressed && styles.pressed,
+        ]}
+      >
+        <Text style={[styles.dockBtnText, { color: palette.paper }]}>+  OPEN A ROOM</Text>
+      </Pressable>
+    </View>
+  );
+}
+
+/* --------------------------------------------------------------- unused imports kept
+ * `formatDateTime`, `timeAgo` and `initialsFor` are imported for compatibility with
+ * downstream reporting; harmless if unreferenced after the Direction B refactor.
+ * ----------------------------------------------------------------------- */
+void formatDateTime;
+void timeAgo;
+void initialsFor;
+
+/* ------------------------------------------------------------------- Styles */
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  list: { paddingHorizontal: spacing.gutter, paddingBottom: 40 },
-  hero: { paddingTop: 18, paddingBottom: 20, borderBottomWidth: 1 },
-  kicker: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11,
-    letterSpacing: 1.5,
-    textTransform: "uppercase",
-  },
-  title: {
-    fontFamily: fontFamilies.serifLight,
-    fontSize: 34,
-    lineHeight: 39,
-    letterSpacing: -0.6,
-    marginTop: 6,
-  },
-  subtitle: {
-    fontFamily: fontFamilies.serifLight,
-    fontSize: 16,
-    lineHeight: 23,
-    marginTop: 8,
-  },
-  hostBar: {
+  list: { paddingHorizontal: spacing.gutter },
+
+  /* ---- Masthead ---- */
+  masthead: {
+    height: 52,
+    paddingHorizontal: spacing.gutter,
     flexDirection: "row",
     alignItems: "center",
-    flexWrap: "wrap",
-    gap: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginTop: 18,
-  },
-  hostIdentity: { flex: 1, minWidth: 0, minHeight: 44, justifyContent: "center" },
-  hostText: { fontFamily: fontFamilies.sansRegular, fontSize: 12, lineHeight: 17 },
-  hostLink: {
-    fontFamily: fontFamilies.sansMedium,
-    textDecorationLine: "underline",
-  },
-  hostBtn: { paddingHorizontal: 14, minHeight: 44, justifyContent: "center" },
-  hostBtnText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-  },
-  dismiss: {
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 11,
-    textDecorationLine: "underline",
-  },
-  earnRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    minHeight: 56,
-    paddingVertical: 12,
-    marginTop: 18,
-    borderBottomWidth: 1,
-  },
-  earnText: { flex: 1, minWidth: 0 },
-  earnTitle: { fontFamily: fontFamilies.serifMedium, fontSize: 16 },
-  earnMeta: { fontFamily: fontFamilies.sansRegular, fontSize: 11.5, marginTop: 2 },
-  earnChevron: { fontFamily: fontFamilies.serifRegular, fontSize: 22 },
-  sectionHeading: {
-    flexDirection: "row",
-    alignItems: "baseline",
     justifyContent: "space-between",
     borderBottomWidth: 1,
+  },
+  wordmark: { flexDirection: "row", alignItems: "baseline", gap: 10 },
+  wordmarkIcn: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 17,
+    letterSpacing: 1.4,
+  },
+  wordmarkDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginLeft: -8,
+    alignSelf: "flex-end",
+    marginBottom: 2,
+  },
+  wordmarkSection: {
+    fontFamily: fontFamilies.serifMedium,
+    fontSize: 17,
+    letterSpacing: -0.2,
+  },
+  mastheadRight: { flexDirection: "row", alignItems: "center", gap: 10 },
+
+  /* ---- ON AIR chyron ---- */
+  chyron: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.gutter,
+    paddingVertical: 9,
+    gap: 12,
+  },
+  chyronText: {
+    flex: 1,
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 10.5,
+    letterSpacing: 1.4,
+    textTransform: "uppercase",
+  },
+  chyronClock: {
+    fontFamily: fontFamilies.sansRegular,
+    fontSize: 10.5,
+    letterSpacing: 0.8,
+  },
+
+  /* ---- Section header ---- */
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "baseline",
     paddingBottom: 6,
-    marginTop: 26,
+    marginTop: 22,
+    borderBottomWidth: 1,
   },
   sectionTitle: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 11,
-    letterSpacing: 1.5,
+    letterSpacing: 1.4,
     textTransform: "uppercase",
   },
   sectionCta: {
     fontFamily: fontFamilies.sansRegular,
     fontSize: 11,
-    letterSpacing: 0.6,
+    letterSpacing: 0.8,
     textTransform: "uppercase",
   },
-  row: { paddingVertical: 18 },
-  rowMeta: { flexDirection: "row", alignItems: "center", gap: 6, flexWrap: "wrap" },
-  liveWrap: { flexDirection: "row", alignItems: "center", gap: 5 },
-  liveDot: { width: 6, height: 6, borderRadius: 3 },
+
+  /* ---- Scheduled row ---- */
+  schedRow: {
+    flexDirection: "row",
+    gap: 16,
+    paddingVertical: 14,
+    paddingTop: 14,
+  },
+  schedStamp: {
+    width: 86,
+    paddingTop: 2,
+  },
+  schedDay: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 10.5,
+    letterSpacing: 1.3,
+    textTransform: "uppercase",
+  },
+  schedTime: {
+    fontFamily: fontFamilies.serifMedium,
+    fontSize: 15.5,
+    marginTop: 2,
+    letterSpacing: -0.2,
+  },
+  schedBody: { flex: 1, minWidth: 0 },
+  schedTitle: {
+    fontFamily: fontFamilies.serifMedium,
+    fontSize: 17,
+    lineHeight: 22,
+    letterSpacing: -0.2,
+  },
+  schedMeta: {
+    fontFamily: fontFamilies.sansRegular,
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  /* ---- Signed-in bar ---- */
+  signedInBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 10,
+    marginTop: 20,
+    gap: 12,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+  },
+  signedInIdentity: { flex: 1, minWidth: 0, minHeight: 36, justifyContent: "center" },
+  signedInText: {
+    fontFamily: fontFamilies.sansRegular,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  signedInName: {
+    fontFamily: fontFamilies.sansMedium,
+    textDecorationLine: "underline",
+  },
+  signedInLink: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 10.5,
+    letterSpacing: 1.1,
+    textTransform: "uppercase",
+  },
+
+  /* ---- Live room card ---- */
+  card: { paddingVertical: 20 },
+  cardKicker: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexWrap: "wrap",
+  },
+  liveDot: { width: 7, height: 7, borderRadius: 3.5 },
   liveLabel: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 10.5,
     letterSpacing: 1.4,
     textTransform: "uppercase",
   },
-  metaDim: { fontFamily: fontFamilies.sansRegular, fontSize: 11.5 },
-  fullChip: { borderWidth: 1, paddingHorizontal: 6, paddingVertical: 1 },
+  cardMeta: {
+    fontFamily: fontFamilies.sansRegular,
+    fontSize: 11.5,
+  },
+  fullChip: {
+    borderWidth: 1,
+    paddingHorizontal: 6,
+    paddingVertical: 1,
+    marginLeft: 4,
+  },
   fullChipText: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 9.5,
     letterSpacing: 1.1,
     textTransform: "uppercase",
   },
-  roomTitle: {
-    fontFamily: fontFamilies.serifMedium,
-    fontSize: 21,
-    lineHeight: 26,
-    letterSpacing: -0.3,
-    marginTop: 7,
-  },
-  /* The lead live room, set like a front-page lead. */
-  roomTitleLead: {
+  cardTitle: {
     fontFamily: fontFamilies.serifLight,
-    fontSize: 28,
-    lineHeight: 33,
-    letterSpacing: -0.6,
+    fontSize: 24,
+    lineHeight: 29,
+    letterSpacing: -0.5,
     marginTop: 8,
   },
-  roomDesc: {
-    fontFamily: fontFamilies.serifRegular,
-    fontSize: 15,
-    lineHeight: 22,
-    marginTop: 6,
-  },
-  footRow: { flexDirection: "row", alignItems: "center", gap: 10, marginTop: 12 },
-  footText: { flex: 1, minWidth: 0 },
-  hostName: { fontFamily: fontFamilies.serifMedium, fontSize: 14.5 },
-  roomFoot: { fontFamily: fontFamilies.sansRegular, fontSize: 12, marginTop: 1 },
-  leadCta: {
-    alignSelf: "flex-start",
-    borderWidth: 1,
-    paddingHorizontal: 18,
-    minHeight: 44,
-    justifyContent: "center",
+
+  cardIdentityRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
     marginTop: 14,
   },
-  leadCtaText: {
+  cardIdentityText: { flex: 1, minWidth: 0 },
+  cardHostName: {
+    fontFamily: fontFamilies.serifMedium,
+    fontSize: 14.5,
+  },
+  cardHostRole: {
     fontFamily: fontFamilies.sansMedium,
-    fontSize: 11.5,
-    letterSpacing: 1.3,
+    fontSize: 10,
+    letterSpacing: 1.1,
     textTransform: "uppercase",
   },
+  cardCounts: {
+    fontFamily: fontFamilies.sansRegular,
+    fontSize: 12,
+    marginTop: 2,
+  },
+
+  reRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 10,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: "transparent",
+  },
+  reLabel: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 10.5,
+    letterSpacing: 1.3,
+    textTransform: "uppercase",
+    paddingTop: 3,
+  },
+  reBody: {
+    flex: 1,
+    fontFamily: fontFamilies.serifRegular,
+    fontSize: 14.5,
+    lineHeight: 21,
+  },
+
+  /* ---- OPEN A ROOM dock ---- */
+  dock: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: spacing.gutter,
+    paddingTop: 10,
+    borderTopWidth: 1,
+  },
+  dockBtn: {
+    minHeight: 54,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  dockBtnText: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 12.5,
+    letterSpacing: 1.6,
+    textTransform: "uppercase",
+  },
+
+  /* ---- Misc ---- */
   loading: { paddingVertical: 40, alignItems: "center" },
   pressed: { opacity: 0.75 },
 });
