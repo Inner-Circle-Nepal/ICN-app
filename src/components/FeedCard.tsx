@@ -80,6 +80,23 @@ function FeedCardInner({ article, height }: FeedCardProps) {
       accessibilityLabel={`${flag ? `${flag}. ` : ""}${section}. ${title}`}
       style={[styles.page, { height, backgroundColor: palette.paper, borderBottomColor: palette.rule }]}
     >
+      {/* Background: the photograph, blurred and washed with paper, so the
+          page carries the story's colours without going dark. */}
+      {uri ? (
+        <>
+          <Image
+            source={{ uri }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            blurRadius={40}
+            cachePolicy="memory-disk"
+            recyclingKey={`${article.slug}:bg`}
+            accessible={false}
+          />
+          <View style={[StyleSheet.absoluteFill, { backgroundColor: palette.paper, opacity: 0.62 }]} />
+        </>
+      ) : null}
+
       {/* Top: section and time. */}
       <View style={styles.top}>
         <View style={[styles.accent, { backgroundColor: palette.red }]} />
