@@ -27,26 +27,35 @@ import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
  * Deliberately no Apply button. Applications do not exist yet; a button that
  * acknowledges a tap and does nothing is worse than its absence.
  */
+/**
+ * Outer guard: `useUser` throws when called outside <ClerkProvider>, and the
+ * provider mounts only when `isClerkConfigured`. Branching the whole screen
+ * keeps the hook off the render path in builds without a Clerk key.
+ */
 export default function EarnOnChautariScreen() {
+  if (!isClerkConfigured) {
+    return <EarnScreenBody verified={false} />;
+  }
+  return <EarnScreenWithClerk />;
+}
+
+function EarnScreenWithClerk() {
+  const { user, isLoaded } = useUser();
+  const verified = isLoaded && user
+    ? isAccountVerified({ emails: user.emailAddresses, phones: user.phoneNumbers })
+    : false;
+  return <EarnScreenBody verified={verified} />;
+}
+
+function EarnScreenBody({ verified }: { verified: boolean }) {
   const router = useRouter();
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
-  const { user, isLoaded } = useUser();
 
   const back = () => {
     if (router.canGoBack()) router.back();
     else router.replace("/chautari");
   };
-
-  /*
-   * Verification is read from the live Clerk resource, never assumed. A
-   * signed-out reader gets `false`, which is the honest answer — not an
-   * optimistic one.
-   */
-  const verified =
-    isClerkConfigured && isLoaded && user
-      ? isAccountVerified({ emails: user.emailAddresses, phones: user.phoneNumbers })
-      : false;
 
   const requirements = buildRequirements({
     verified,

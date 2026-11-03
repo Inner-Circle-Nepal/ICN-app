@@ -54,7 +54,38 @@ import { fontFamilies, spacing } from "@/theme/tokens";
  * Chautari endpoints authorise against, and changing it is a verification
  * flow rather than a text field.
  */
+/**
+ * Outer guard: `useAuth`/`useUser` throw outside <ClerkProvider>, which is
+ * mounted only when `isClerkConfigured`. An unconfigured build would never
+ * reach this route through normal navigation (there is no profile link
+ * without a signed-in account), but a stray deep link or an unexpected
+ * state transition could — show a graceful fallback instead of crashing.
+ */
 export default function ProfileScreen() {
+  if (!isClerkConfigured) {
+    return <ProfileUnavailable />;
+  }
+  return <ProfileScreenActive />;
+}
+
+function ProfileUnavailable() {
+  const router = useRouter();
+  const { palette } = useTheme();
+  const insets = useSafeAreaInsets();
+  return (
+    <View style={{ flex: 1, backgroundColor: palette.paper, paddingTop: insets.top }}>
+      <ErrorState
+        title="Profile unavailable"
+        message="This build has no account system configured."
+        onRetry={() =>
+          router.canGoBack() ? router.back() : router.replace("/")
+        }
+      />
+    </View>
+  );
+}
+
+function ProfileScreenActive() {
   const router = useRouter();
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();

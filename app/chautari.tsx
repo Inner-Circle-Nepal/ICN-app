@@ -227,8 +227,6 @@ function kathmanduClock(d: Date): string {
  */
 function Masthead({ palette }: { palette: ThemePalette }) {
   const router = useRouter();
-  const { isSignedIn } = useAuth();
-  const { user } = useUser();
 
   return (
     <View style={[styles.masthead, { borderBottomColor: palette.rule }]}>
@@ -245,22 +243,37 @@ function Masthead({ palette }: { palette: ThemePalette }) {
       </Pressable>
 
       <View style={styles.mastheadRight}>
-        {isClerkConfigured && isSignedIn && user ? (
-          <Pressable
-            onPress={() => router.push("/profile")}
-            accessibilityRole="button"
-            accessibilityLabel="Open your profile"
-            hitSlop={8}
-          >
-            <Avatar
-              name={user.fullName?.trim() || user.firstName?.trim() || "You"}
-              size="sm"
-              imageUrl={user.hasImage ? user.imageUrl : null}
-            />
-          </Pressable>
-        ) : null}
+        {/*
+          Clerk hooks are only legal under <ClerkProvider>, and the provider
+          mounts in _layout.tsx only when `isClerkConfigured`. Isolate the hook
+          calls inside a sub-component that is NEVER rendered without Clerk
+          configured — otherwise an unconfigured build (no publishable key)
+          crashes the moment the lobby opens.
+        */}
+        {isClerkConfigured ? <MastheadIdentity /> : null}
       </View>
     </View>
+  );
+}
+
+function MastheadIdentity() {
+  const router = useRouter();
+  const { isSignedIn } = useAuth();
+  const { user } = useUser();
+  if (!isSignedIn || !user) return null;
+  return (
+    <Pressable
+      onPress={() => router.push("/profile")}
+      accessibilityRole="button"
+      accessibilityLabel="Open your profile"
+      hitSlop={8}
+    >
+      <Avatar
+        name={user.fullName?.trim() || user.firstName?.trim() || "You"}
+        size="sm"
+        imageUrl={user.hasImage ? user.imageUrl : null}
+      />
+    </Pressable>
   );
 }
 
@@ -393,10 +406,6 @@ function formatScheduleStamp(scheduledFor: string | null): { day: string; time: 
  * because it is only useful to someone who could host.
  */
 function SignedInBar({ palette }: { palette: ThemePalette }) {
-  const router = useRouter();
-  const { isSignedIn } = useAuth();
-  const { user } = useUser();
-
   if (!isClerkConfigured) {
     return (
       <View
@@ -408,6 +417,17 @@ function SignedInBar({ palette }: { palette: ThemePalette }) {
       </View>
     );
   }
+  return <SignedInBarActive palette={palette} />;
+}
+
+/**
+ * Inner body — mounted only when Clerk is configured, so `useAuth`/`useUser`
+ * are guaranteed to be inside <ClerkProvider>.
+ */
+function SignedInBarActive({ palette }: { palette: ThemePalette }) {
+  const router = useRouter();
+  const { isSignedIn } = useAuth();
+  const { user } = useUser();
 
   if (!isSignedIn) {
     return (
@@ -591,10 +611,24 @@ function OpenRoomDock({
   palette: ThemePalette;
   insetsBottom: number;
 }) {
+  if (!isClerkConfigured) return null;
+  return <OpenRoomDockActive palette={palette} insetsBottom={insetsBottom} />;
+}
+
+/**
+ * Inner body — mounted only when Clerk is configured. `useAuth` is safe here.
+ */
+function OpenRoomDockActive({
+  palette,
+  insetsBottom,
+}: {
+  palette: ThemePalette;
+  insetsBottom: number;
+}) {
   const router = useRouter();
   const { isSignedIn } = useAuth();
 
-  if (!isClerkConfigured || !isSignedIn) return null;
+  if (!isSignedIn) return null;
 
   return (
     <View

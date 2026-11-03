@@ -45,14 +45,24 @@ import type { LanguagePreference, ThemePreference } from "@/types/domain";
  * Renders nothing when this build has no account system — the same rule the
  * rest of the app follows, so an unconfigured build looks exactly as it did
  * before accounts existed.
+ *
+ * The Clerk hooks are isolated in `AccountRowActive` because `useAuth` and
+ * `useUser` throw outside <ClerkProvider>, which is mounted only when
+ * `isClerkConfigured`. Branching the whole component — not just the render —
+ * keeps the hook off the render path in builds without a Clerk key.
  */
 function AccountRow() {
+  if (!isClerkConfigured) return null;
+  return <AccountRowActive />;
+}
+
+function AccountRowActive() {
   const router = useRouter();
   const { palette } = useTheme();
   const { isSignedIn, isLoaded } = useAuth();
   const { user } = useUser();
 
-  if (!isClerkConfigured || !isLoaded) return null;
+  if (!isLoaded) return null;
 
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
   const name = user?.fullName?.trim() || user?.firstName?.trim() || email?.split("@")[0] || null;
