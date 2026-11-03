@@ -14,8 +14,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const h = vi.hoisted(() => {
   const rooms: { slug: string; phase: string; connect: ReturnType<typeof vi.fn>; leave: ReturnType<typeof vi.fn>; unmounted: boolean }[] = [];
-  return { rooms };
+  return { rooms, bgStart: vi.fn(), bgStop: vi.fn() };
 });
+
+vi.mock("@/lib/livekit/backgroundAudio", () => ({
+  startBackgroundAudio: h.bgStart,
+  stopBackgroundAudio: h.bgStop,
+}));
 
 vi.mock("@clerk/clerk-expo", () => ({
   useAuth: () => ({ isSignedIn: true, getToken: async () => "t" }),
@@ -62,6 +67,8 @@ let container: HTMLDivElement;
 
 beforeEach(async () => {
   h.rooms.length = 0;
+  h.bgStart.mockClear();
+  h.bgStop.mockClear();
   container = document.createElement("div");
   root = createRoot(container);
   await act(async () => {
@@ -122,5 +129,13 @@ describe("ActiveRoomProvider", () => {
     expect(h.rooms).toHaveLength(2);
     expect(h.rooms[0].unmounted).toBe(true);
     expect(api.room?.phase).toBe("connected");
+  });
+
+  it("keeps audio alive in the background while in the room, and stops it on leave", async () => {
+    await enter("a");
+    expect(h.bgStart).toHaveBeenCalledWith("Room", undefined);
+    h.bgStop.mockClear();
+    await act(async () => api.leave());
+    expect(h.bgStop).toHaveBeenCalled();
   });
 });

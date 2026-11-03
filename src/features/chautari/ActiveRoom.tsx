@@ -9,6 +9,7 @@ import React, {
 } from "react";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { isClerkConfigured } from "@/constants/config";
+import { startBackgroundAudio, stopBackgroundAudio } from "@/lib/livekit/backgroundAudio";
 import { isLiveKitAvailable } from "@/lib/livekit/platform";
 import { useChautariRoom, type ChautariRoomState } from "./useChautariRoom";
 
@@ -113,14 +114,27 @@ export function ActiveRoomProvider({ children }: { children: React.ReactNode }) 
         screen itself requires.
       */}
       {active && isClerkConfigured && isLiveKitAvailable() ? (
-        <RoomRunner key={`${active.slug}:${session}`} slug={active.slug} store={store} />
+        <RoomRunner
+          key={`${active.slug}:${session}`}
+          slug={active.slug}
+          hintedTitle={active.hintedTitle}
+          store={store}
+        />
       ) : null}
     </ActiveRoomContext.Provider>
   );
 }
 
 /** Holds the connection for one room and publishes its state. Renders nothing. */
-function RoomRunner({ slug, store }: { slug: string; store: RoomStore }) {
+function RoomRunner({
+  slug,
+  hintedTitle,
+  store,
+}: {
+  slug: string;
+  hintedTitle: string | null;
+  store: RoomStore;
+}) {
   const { isSignedIn, getToken } = useAuth();
   const { user } = useUser();
   const displayName = user?.fullName?.trim() || user?.firstName?.trim() || null;
@@ -140,6 +154,20 @@ function RoomRunner({ slug, store }: { slug: string; store: RoomStore }) {
   useEffect(() => {
     if (isSignedIn && phase === "idle") connect();
   }, [isSignedIn, phase, connect]);
+
+  /*
+   * Keep the audio alive when the phone locks or the reader switches apps.
+   * iOS does this by itself; on Android it takes a foreground service with an
+   * ongoing notification, held for as long as the room is up.
+   */
+  const inRoom = phase === "connected" || phase === "reconnecting";
+  const title = room.identity?.title ?? hintedTitle ?? "Chautari";
+  const speaking = room.canPublish;
+  useEffect(() => {
+    if (inRoom) startBackgroundAudio(title, speaking);
+    else stopBackgroundAudio();
+  }, [inRoom, title, speaking]);
+  useEffect(() => () => stopBackgroundAudio(), []);
 
   return null;
 }
