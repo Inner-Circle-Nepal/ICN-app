@@ -24,9 +24,10 @@ import {
 import {
   END_MESSAGES,
   isBusy,
-  useChautariRoom,
+  type ChautariRoomState,
   type RoomMember,
 } from "@/features/chautari/useChautariRoom";
+import { useActiveRoom } from "@/features/chautari/ActiveRoom";
 import { submitContactMessage } from "@/lib/api/newsletter";
 import { getBlockedIdentities, setBlockedIdentities } from "@/lib/storage/chautariBlocks";
 import { isClerkConfigured } from "@/constants/config";
@@ -58,6 +59,28 @@ import { ErrorState } from "@/components/ErrorState";
  * been invited up. Listeners are the unbounded side (the default ceiling is
  * 200 and the maximum is 1,000), so they are what `FlatList` windows.
  */
+/** What the screen shows before the shared room exists: a join about to start. */
+const noop = () => {};
+const IDLE_ROOM: ChautariRoomState = {
+  phase: "idle",
+  error: null,
+  endReason: null,
+  identity: null,
+  role: null,
+  canPublish: false,
+  micEnabled: false,
+  micError: null,
+  micBlocked: false,
+  dismissMicError: noop,
+  members: [],
+  listenerCount: 0,
+  connect: noop,
+  leave: noop,
+  toggleMic: noop,
+  retry: noop,
+  setBlocked: noop,
+};
+
 interface ListenerRow {
   key: string;
   member: RoomMember;
@@ -106,7 +129,15 @@ export default function ChautariRoomScreen() {
    */
   const localImageUrl = user?.hasImage ? user.imageUrl : null;
 
-  const room = useChautariRoom(slug, getToken, displayName);
+  /*
+   * The connection lives in ActiveRoomProvider, not here, so going Back keeps
+   * the reader in the room (see MiniRoomBar). This screen only asks to enter
+   * and reads the shared state; before that state exists it shows an idle
+   * room, which renders the same "Checking your access" as a fresh join.
+   */
+  const { active, enter, leave: leaveRoom, room: sharedRoom } = useActiveRoom();
+  const room: ChautariRoomState =
+    active?.slug === slug && sharedRoom ? sharedRoom : IDLE_ROOM;
 
   const [handRaised, setHandRaisedState] = useState(false);
   const [handBusy, setHandBusy] = useState(false);
@@ -142,17 +173,29 @@ export default function ChautariRoomScreen() {
    * to "idle" it would immediately reconnect a room the user had just left.
    * `leave()` now lands on "left", which this condition deliberately excludes.
    */
-  const { phase, connect } = room;
   useEffect(() => {
     if (!liveAudioSupported || !isSignedIn || !slug) return;
-    if (phase === "idle") connect();
-  }, [liveAudioSupported, isSignedIn, slug, phase, connect]);
+    enter({ slug, hintedTitle, hintedHost });
+  }, [liveAudioSupported, isSignedIn, slug, hintedTitle, hintedHost, enter]);
 
-  const leaveAndBack = useCallback(() => {
-    room.leave();
+  const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace("/chautari");
-  }, [room, router]);
+  }, [router]);
+
+  /* Leave or End room: drop the connection, then go back. */
+  const leaveAndBack = useCallback(() => {
+    leaveRoom();
+    goBack();
+  }, [leaveRoom, goBack]);
+
+  /*
+   * Back keeps a live room running. A room that ended, failed or was left
+   * has nothing to keep, so Back clears it rather than leaving it behind the
+   * mini bar.
+   */
+  const live = room.phase !== "ended" && room.phase !== "error" && room.phase !== "left";
+  const back = live ? goBack : leaveAndBack;
 
   const toggleHand = useCallback(async () => {
     if (handBusy) return;
@@ -321,7 +364,7 @@ export default function ChautariRoomScreen() {
 
   if (!isClerkConfigured) {
     return (
-      <Shell title={title} onBack={leaveAndBack}>
+      <Shell title={title} onBack={back}>
         <ErrorState
           title="Conversations are unavailable"
           message="This build has no account system configured."
@@ -336,7 +379,7 @@ export default function ChautariRoomScreen() {
    */
   if (!liveAudioSupported) {
     return (
-      <Shell title={title} onBack={leaveAndBack}>
+      <Shell title={title} onBack={back}>
         <ErrorState
           title="Live audio needs the full app"
           message="This preview build cannot play live conversations. Install Inner Circle Nepal from the app store to listen."
@@ -347,7 +390,7 @@ export default function ChautariRoomScreen() {
 
   if (!isSignedIn) {
     return (
-      <Shell title={title} onBack={leaveAndBack}>
+      <Shell title={title} onBack={back}>
         <ErrorState
           title="Sign in to join"
           message="Chautari rooms are open to readers with an account. Listening is free."
@@ -359,12 +402,12 @@ export default function ChautariRoomScreen() {
 
   /* The user asked to leave; navigation is already under way. */
   if (room.phase === "left") {
-    return <Shell title={title} onBack={leaveAndBack} />;
+    return <Shell title={title} onBack={back} />;
   }
 
   if (room.phase === "error") {
     return (
-      <Shell title={title} onBack={leaveAndBack}>
+      <Shell title={title} onBack={back}>
         <ErrorState
           title="Could not join"
           message={room.error ?? "Please try again."}
@@ -377,7 +420,7 @@ export default function ChautariRoomScreen() {
   if (room.phase === "ended") {
     const copy = END_MESSAGES[room.endReason ?? "unknown"];
     return (
-      <Shell title={title} onBack={leaveAndBack}>
+      <Shell title={title} onBack={back}>
         <ErrorState
           title={copy.title}
           message={copy.message}
@@ -399,7 +442,7 @@ export default function ChautariRoomScreen() {
   }
 
   return (
-    <Shell title={title} onBack={leaveAndBack}>
+    <Shell title={title} onBack={back}>
       <FlatList
         data={listenerRows}
         keyExtractor={(r) => r.key}

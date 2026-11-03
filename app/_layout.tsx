@@ -36,6 +36,8 @@ import { persistOptions, queryClient } from "@/lib/query/queryClient";
 import { ThemeProvider, useAppTheme } from "@/theme/ThemeContext";
 import { BookmarksProvider } from "@/features/bookmarks/BookmarksContext";
 import { BottomNav } from "@/components/BottomNav";
+import { MiniRoomBar } from "@/components/chautari/MiniRoomBar";
+import { ActiveRoomProvider } from "@/features/chautari/ActiveRoom";
 import { extractNotificationPath, syncPushRegistration } from "@/lib/notifications/push";
 import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
 
@@ -183,6 +185,7 @@ function AppShell() {
           />
         </Stack>
       </View>
+      <MiniRoomBar />
       <BottomNav />
     </SafeAreaView>
   );
@@ -214,7 +217,9 @@ export default function RootLayout() {
     <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
       <ThemeProvider>
         <BookmarksProvider>
-          <AppShell />
+          <ActiveRoomProvider>
+            <AppShell />
+          </ActiveRoomProvider>
         </BookmarksProvider>
       </ThemeProvider>
     </PersistQueryClientProvider>
