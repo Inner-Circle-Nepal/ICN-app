@@ -27,7 +27,7 @@ import { initialsFor } from "@/features/chautari/initials";
  *
  * The whole screen is composed like a wire-service bulletin board:
  *
- *   ┌─ ICN. Chautari                               ⟨you⟩ ┐  (masthead)
+ *   ┌─ Chautari ko chayama swagat cha              ⟨you⟩ ┐  (masthead)
  *   │ ──────────────────────────────────────────────────  │
  *   │ ON AIR · N rooms live from the newsroom · HH:MM NPT │  (chyron)
  *   │                                                    │
@@ -197,28 +197,24 @@ function kathmanduClock(d: Date): string {
 /* ------------------------------------------------------------------ Masthead */
 
 /**
- * Top of every lobby view: paper wordmark + the signed-in reader's chip.
+ * Top of every lobby view: a welcome line + the signed-in reader's chip.
  *
  * Kept inline rather than reusing `AppHeader` because Direction B's masthead
  * is Chautari-specific — it carries the section name and the bar separators
  * that the general app header does not.
  */
 function Masthead({ palette }: { palette: ThemePalette }) {
-  const router = useRouter();
-
   return (
     <View style={[styles.masthead, { borderBottomColor: palette.rule }]}>
-      <Pressable
-        onPress={() => router.navigate("/")}
-        accessibilityRole="button"
-        accessibilityLabel="Back to Inner Circle Nepal front page"
-        style={styles.wordmark}
-        hitSlop={6}
+      <Text
+        style={[styles.welcome, { color: palette.ink }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.8}
+        accessibilityRole="header"
       >
-        <Text style={[styles.wordmarkIcn, { color: palette.ink }]}>ICN</Text>
-        <View style={[styles.wordmarkDot, { backgroundColor: palette.red }]} />
-        <Text style={[styles.wordmarkSection, { color: palette.ink }]}>Chautari</Text>
-      </Pressable>
+        Chautari ko chayama swagat cha
+      </Text>
 
       <View style={styles.mastheadRight}>
         {/*
@@ -666,24 +662,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.gutter,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     borderBottomWidth: 1,
   },
-  wordmark: { flexDirection: "row", alignItems: "baseline", gap: 10 },
-  wordmarkIcn: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 17,
-    letterSpacing: 1.4,
-  },
-  wordmarkDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginLeft: -8,
-    alignSelf: "flex-end",
-    marginBottom: 2,
-  },
-  wordmarkSection: {
+  /* Centred on the bar; the side insets leave room for the avatar on the right. */
+  welcome: {
+    position: "absolute",
+    left: spacing.gutter + 36,
+    right: spacing.gutter + 36,
+    textAlign: "center",
     fontFamily: fontFamilies.serifMedium,
     fontSize: 17,
     letterSpacing: -0.2,
