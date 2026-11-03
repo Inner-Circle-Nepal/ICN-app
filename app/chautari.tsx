@@ -402,8 +402,8 @@ function formatScheduleStamp(scheduledFor: string | null): { day: string; time: 
 /**
  * Thin horizontal bar: who you are, and a link to the earn programme.
  *
- * Unsigned readers see a sign-in prompt instead; the earn link disappears
- * because it is only useful to someone who could host.
+ * Unsigned readers see a sign-in prompt in place of their name; the earn
+ * link stays, so anyone can read what hosting and earning require.
  */
 function SignedInBar({ palette }: { palette: ThemePalette }) {
   if (!isClerkConfigured) {
@@ -434,16 +434,18 @@ function SignedInBarActive({ palette }: { palette: ThemePalette }) {
       <View
         style={[styles.signedInBar, { borderTopColor: palette.rule, borderBottomColor: palette.rule }]}
       >
-        <Text style={[styles.signedInText, { color: palette.quiet }]} numberOfLines={1}>
-          Sign in to join a conversation.
-        </Text>
         <Pressable
           onPress={() => router.push("/sign-in")}
           accessibilityRole="button"
-          hitSlop={10}
+          accessibilityLabel="Sign in to join a conversation"
+          hitSlop={6}
+          style={styles.signedInIdentity}
         >
-          <Text style={[styles.signedInLink, { color: palette.ink }]}>SIGN IN →</Text>
+          <Text style={[styles.signedInText, { color: palette.quiet }]} numberOfLines={1}>
+            <Text style={[styles.signedInName, { color: palette.ink }]}>Sign in</Text> to join
+          </Text>
         </Pressable>
+        <EarnLink />
       </View>
     );
   }
@@ -465,15 +467,24 @@ function SignedInBarActive({ palette }: { palette: ThemePalette }) {
           <Text style={[styles.signedInName, { color: palette.ink }]}>{name}</Text>
         </Text>
       </Pressable>
-      <Pressable
-        onPress={() => router.push("/chautari/earn")}
-        accessibilityRole="button"
-        accessibilityLabel="Earn on Chautari — see the programme requirements"
-        hitSlop={10}
-      >
-        <Text style={[styles.signedInLink, { color: palette.ink }]}>EARN ON CHAUTARI →</Text>
-      </Pressable>
+      <EarnLink />
     </View>
+  );
+}
+
+/** The link to the earn programme, shown to every reader, signed in or not. */
+function EarnLink() {
+  const router = useRouter();
+  const { palette } = useTheme();
+  return (
+    <Pressable
+      onPress={() => router.push("/chautari/earn")}
+      accessibilityRole="button"
+      accessibilityLabel="Earn on Chautari — see the programme requirements"
+      hitSlop={10}
+    >
+      <Text style={[styles.signedInLink, { color: palette.ink }]}>EARN ON CHAUTARI →</Text>
+    </Pressable>
   );
 }
 
