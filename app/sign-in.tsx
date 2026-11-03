@@ -31,7 +31,37 @@ import { ErrorState } from "@/components/ErrorState";
  * Styled as part of the paper rather than as a dropped-in auth widget, the
  * same decision `clerkAppearance` makes on the website.
  */
+/**
+ * Outer guard: `useAuth` / `useSignIn` / `useSignUp` throw outside
+ * <ClerkProvider>, which is mounted only when `isClerkConfigured`. In an
+ * unconfigured build this route should not be reachable through the UI,
+ * but a stray deep link or notification tap could land here — show a plain
+ * fallback instead of crashing.
+ */
 export default function SignInScreen() {
+  if (!isClerkConfigured) {
+    return <SignInUnavailable />;
+  }
+  return <SignInScreenActive />;
+}
+
+function SignInUnavailable() {
+  const router = useRouter();
+  const { palette } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: palette.paper }}>
+      <ErrorState
+        title="Sign-in unavailable"
+        message="This build has no account system configured."
+        onRetry={() =>
+          router.canGoBack() ? router.back() : router.replace("/")
+        }
+      />
+    </View>
+  );
+}
+
+function SignInScreenActive() {
   const router = useRouter();
   const { palette } = useTheme();
   const { isSignedIn } = useAuth();
