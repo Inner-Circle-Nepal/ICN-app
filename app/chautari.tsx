@@ -27,7 +27,7 @@ import { initialsFor } from "@/features/chautari/initials";
  *
  * The whole screen is composed like a wire-service bulletin board:
  *
- *   ┌─ Chautari ko chayama swagat cha              ⟨you⟩ ┐  (masthead)
+ *   ┌─      CHAUTARI KO CHAYAMA SWAGAT CHA        ⟨you⟩ ┐  (masthead)
  *   │ ──────────────────────────────────────────────────  │
  *   │ ON AIR · N rooms live from the newsroom · HH:MM NPT │  (chyron)
  *   │                                                    │
@@ -210,10 +210,10 @@ function Masthead({ palette }: { palette: ThemePalette }) {
         style={[styles.welcome, { color: palette.ink }]}
         numberOfLines={1}
         adjustsFontSizeToFit
-        minimumFontScale={0.8}
+        minimumFontScale={0.75}
         accessibilityRole="header"
       >
-        Chautari ko chayama swagat cha
+        CHAUTARI KO CHAYAMA SWAGAT CHA
       </Text>
 
       <View style={styles.mastheadRight}>
@@ -672,8 +672,8 @@ const styles = StyleSheet.create({
     right: spacing.gutter + 36,
     textAlign: "center",
     fontFamily: fontFamilies.serifMedium,
-    fontSize: 17,
-    letterSpacing: -0.2,
+    fontSize: 13,
+    letterSpacing: 0.2,
   },
   mastheadRight: { flexDirection: "row", alignItems: "center", gap: 10 },
 
