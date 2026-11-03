@@ -80,47 +80,53 @@ function FeedCardInner({ article, height }: FeedCardProps) {
       accessibilityLabel={`${flag ? `${flag}. ` : ""}${section}. ${title}`}
       style={[styles.page, { height, backgroundColor: palette.paper, borderBottomColor: palette.rule }]}
     >
-      <View style={[styles.photo, { height: height * 0.52, backgroundColor: palette.paper2 }]}>
-        {uri ? (
-          <Image
-            source={{ uri }}
-            style={StyleSheet.absoluteFill}
-            contentFit="cover"
-            contentPosition="center"
-            transition={150}
-            cachePolicy="memory-disk"
-            recyclingKey={article.slug}
-            accessibilityIgnoresInvertColors
-            onError={() => setImageError(true)}
-          />
-        ) : null}
+      {/* Top: section and time. */}
+      <View style={styles.top}>
+        <View style={[styles.accent, { backgroundColor: palette.red }]} />
+        <Text style={[styles.kicker, { color: quiet }]} numberOfLines={1}>
+          {flag ? <Text style={{ color: palette.red }}>{flag} · </Text> : null}
+          <Text style={{ color: palette.red }}>{section.toUpperCase()}</Text>
+          {" · "}
+          {timeAgo(article.published_at)}
+        </Text>
       </View>
 
-      <View style={styles.body}>
-        <View>
-          <Text style={[styles.kicker, { color: quiet }]} numberOfLines={1}>
-            {flag ? <Text style={{ color: palette.red }}>{flag} · </Text> : null}
-            <Text style={{ color: palette.red }}>{section.toUpperCase()}</Text>
-            {" · "}
-            {timeAgo(article.published_at)}
-          </Text>
-
-          <Text
-            style={[styles.title, { color: ink }, ne && article.title_ne ? styles.titleNe : null]}
-            numberOfLines={4}
-          >
-            {title}
-          </Text>
-
-          {caption ? (
-            <Text
-              style={[styles.caption, { color: quiet }, ne && article.excerpt_ne ? styles.captionNe : null]}
-              numberOfLines={3}
-            >
-              {caption}
-            </Text>
+      {/* Middle: the photograph, centred in the page. */}
+      <View style={styles.middle}>
+        <View style={[styles.photo, { maxHeight: height * 0.46, backgroundColor: palette.paper2 }]}>
+          {uri ? (
+            <Image
+              source={{ uri }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              contentPosition="center"
+              transition={150}
+              cachePolicy="memory-disk"
+              recyclingKey={article.slug}
+              accessibilityIgnoresInvertColors
+              onError={() => setImageError(true)}
+            />
           ) : null}
         </View>
+      </View>
+
+      {/* Bottom: headline, caption, actions. */}
+      <View style={styles.bottom}>
+        <Text
+          style={[styles.title, { color: ink }, ne && article.title_ne ? styles.titleNe : null]}
+          numberOfLines={4}
+        >
+          {title}
+        </Text>
+
+        {caption ? (
+          <Text
+            style={[styles.caption, { color: quiet }, ne && article.excerpt_ne ? styles.captionNe : null]}
+            numberOfLines={2}
+          >
+            {caption}
+          </Text>
+        ) : null}
 
         <View style={[styles.actions, { borderTopColor: palette.rule }]}>
           <Pressable
@@ -178,8 +184,11 @@ export function FeedCardSkeleton({ height }: { height: number }) {
 
 const styles = StyleSheet.create({
   page: { width: "100%", overflow: "hidden", borderBottomWidth: StyleSheet.hairlineWidth },
-  photo: { width: "100%", overflow: "hidden" },
-  body: { flex: 1, justifyContent: "space-between", paddingHorizontal: 18, paddingTop: 16, paddingBottom: 10 },
+  top: { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 18, paddingTop: 14 },
+  accent: { width: 18, height: 3 },
+  middle: { flex: 1, justifyContent: "center" },
+  photo: { width: "100%", aspectRatio: 1080 / 795, overflow: "hidden" },
+  bottom: { paddingHorizontal: 18, paddingBottom: 10 },
   kicker: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 12,
@@ -187,23 +196,23 @@ const styles = StyleSheet.create({
   },
   title: {
     fontFamily: fontFamilies.serifMedium,
-    fontSize: 26,
-    lineHeight: 31,
-    letterSpacing: -0.3,
-    marginTop: 8,
+    fontSize: 29,
+    lineHeight: 34,
+    letterSpacing: -0.4,
   },
   titleNe: { fontFamily: fontFamilies.devaMedium, fontSize: 23, lineHeight: 34 },
   caption: {
     fontFamily: fontFamilies.serifRegular,
     fontSize: 15.5,
     lineHeight: 22,
-    marginTop: 10,
+    marginTop: 8,
   },
   captionNe: { fontFamily: fontFamilies.devaRegular, fontSize: 15, lineHeight: 24 },
   actions: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
+    marginTop: 14,
     paddingTop: 8,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
