@@ -1,5 +1,11 @@
-import React, { useCallback, useMemo } from "react";
-import { ActivityIndicator, FlatList, RefreshControl, StyleSheet, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+  FlatList,
+  RefreshControl,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+} from "react-native";
 import {
   useHomeFeed,
   useInfiniteLatestArticles,
@@ -8,23 +14,31 @@ import { useTheme } from "@/hooks/useTheme";
 import type { ArticleCard } from "@/types/domain";
 
 import { AppHeader } from "@/components/AppHeader";
-import { FEED_GUTTER, FeedCard, FeedCardSkeleton } from "@/components/FeedCard";
+import { FeedCard, FeedCardSkeleton } from "@/components/FeedCard";
 import { EmptyState } from "@/components/EmptyState";
 import { CachedNoticeBanner, ErrorState } from "@/components/ErrorState";
 
 /**
- * Home (`/`): one scrolling feed of photo cards, newest first.
+ * Home (`/`): a vertical feed of full-screen stories, one per swipe, like a
+ * reel. The editors' lead story comes first, then every other story newest
+ * first, loading more as the reader nears the end. Every story appears once.
  *
- * The editors' lead story comes first, then every other story newest first,
- * loading more as the reader scrolls. Every story appears once. Sections, markets and the newsletter
- * live in Newsroom and Settings, so the front page is only stories.
+ * Each page is exactly as tall as the space between the header and the tab
+ * bar (measured, since the mini room bar or a notice can take some of it),
+ * which is what lets the list snap one story at a time.
  */
 
 const WIRE_PAGE = 12;
-const SKELETONS = [0, 1, 2];
 
 export default function HomeScreen() {
   const { palette } = useTheme();
+
+  /* The visible feed height; every page is this tall. */
+  const [pageHeight, setPageHeight] = useState(0);
+  const onLayout = useCallback((e: LayoutChangeEvent) => {
+    const h = Math.round(e.nativeEvent.layout.height);
+    setPageHeight((prev) => (prev === h ? prev : h));
+  }, []);
 
   const {
     data: feed,
@@ -64,8 +78,19 @@ export default function HomeScreen() {
   }, [wire]);
 
   const renderItem = useCallback(
-    ({ item }: { item: ArticleCard }) => <FeedCard article={item} />,
-    [],
+    ({ item }: { item: ArticleCard }) => (
+      <FeedCard article={item} height={pageHeight} />
+    ),
+    [pageHeight],
+  );
+
+  const getItemLayout = useCallback(
+    (_: unknown, index: number) => ({
+      length: pageHeight,
+      offset: pageHeight * index,
+      index,
+    }),
+    [pageHeight],
   );
 
   const screen = [styles.screen, { backgroundColor: palette.paper }];
@@ -74,10 +99,8 @@ export default function HomeScreen() {
     return (
       <View style={screen}>
         <AppHeader showSectionBar={false} />
-        <View style={styles.list}>
-          {SKELETONS.map((k) => (
-            <FeedCardSkeleton key={k} />
-          ))}
+        <View style={styles.fill} onLayout={onLayout}>
+          {pageHeight > 0 ? <FeedCardSkeleton height={pageHeight} /> : null}
         </View>
       </View>
     );
@@ -100,43 +123,53 @@ export default function HomeScreen() {
     <View style={screen}>
       <AppHeader showSectionBar={false} />
 
-      {isError ? <CachedNoticeBanner updatedAt={dataUpdatedAt} onRetry={refresh} /> : null}
+      {isError ? (
+        <CachedNoticeBanner updatedAt={dataUpdatedAt} onRetry={refresh} />
+      ) : null}
 
-      <FlatList
-        data={stories}
-        keyExtractor={(item) => item.slug}
-        renderItem={renderItem}
-        contentContainerStyle={styles.list}
-        initialNumToRender={3}
-        maxToRenderPerBatch={4}
-        windowSize={7}
-        removeClippedSubviews
-        onEndReached={loadMore}
-        onEndReachedThreshold={1.5}
-        refreshControl={
-          <RefreshControl refreshing={isRefetching} onRefresh={refresh} tintColor={palette.ink} />
-        }
-        ListEmptyComponent={
-          <EmptyState
-            kicker="Inner Circle Nepal"
-            title="The presses haven’t rolled yet."
-            description="No stories have been published. Once the newsroom files its first piece it will appear here."
-            actionLabel="Refresh"
-            onAction={refresh}
+      <View style={styles.fill} onLayout={onLayout}>
+        {pageHeight > 0 ? (
+          <FlatList
+            data={stories}
+            keyExtractor={(item) => item.slug}
+            renderItem={renderItem}
+            getItemLayout={getItemLayout}
+            pagingEnabled
+            snapToInterval={pageHeight}
+            snapToAlignment="start"
+            decelerationRate="fast"
+            disableIntervalMomentum
+            showsVerticalScrollIndicator={false}
+            initialNumToRender={2}
+            maxToRenderPerBatch={3}
+            windowSize={5}
+            removeClippedSubviews
+            onEndReached={loadMore}
+            onEndReachedThreshold={3}
+            refreshControl={
+              <RefreshControl
+                refreshing={isRefetching}
+                onRefresh={refresh}
+                tintColor={palette.ink}
+              />
+            }
+            ListEmptyComponent={
+              <EmptyState
+                kicker="Inner Circle Nepal"
+                title="The presses haven’t rolled yet."
+                description="No stories have been published. Once the newsroom files its first piece it will appear here."
+                actionLabel="Refresh"
+                onAction={refresh}
+              />
+            }
           />
-        }
-        ListFooterComponent={
-          wire.isFetchingNextPage ? (
-            <ActivityIndicator style={styles.more} color={palette.quiet} />
-          ) : undefined
-        }
-      />
+        ) : null}
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
-  list: { paddingTop: FEED_GUTTER, paddingBottom: FEED_GUTTER * 2 },
-  more: { paddingVertical: 20 },
+  fill: { flex: 1 },
 });
