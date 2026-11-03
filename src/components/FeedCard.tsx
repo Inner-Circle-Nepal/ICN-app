@@ -3,7 +3,7 @@ import { Platform, Pressable, Share, StyleSheet, Text, View } from "react-native
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import Svg, { Defs, LinearGradient, Path, Rect, Stop } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 import type { ArticleCard } from "@/types/domain";
 import { useBookmarks } from "@/features/bookmarks/BookmarksContext";
 import { useTheme } from "@/hooks/useTheme";
@@ -13,14 +13,12 @@ import { IMAGE_WIDTHS, sizedImageUrl } from "@/utils/images";
 
 /**
  * One story in the home feed: a full-screen vertical (9:16-style) page,
- * scrolled one at a time like a reel. The section, time, headline and a
- * short caption sit at the foot, with Save and Share.
+ * scrolled one at a time like a reel.
  *
- * The newsroom's photographs are landscape (about 1080×795), and a 9:16 crop
- * of that keeps only ~450 px of width, which looks soft on a phone. So the
- * whole photograph is shown sharp across the width, over a blurred, darkened
- * copy of itself that fills the frame, the way social apps present landscape
- * media in a vertical feed. A portrait 1080×1920 upload simply fills it.
+ * The page sits on the same paper background as the rest of the app
+ * (Chautari, Newsroom): the photograph fills the top of the page, and the
+ * section, time, headline and a short caption follow in ink below it, with
+ * Save and Share at the foot.
  *
  * Save and Share are the actions because both exist: there is no comment
  * system, so no comment count is drawn.
@@ -72,31 +70,22 @@ function FeedCardInner({ article, height }: FeedCardProps) {
     }
   }, [article]);
 
+  const ink = palette.ink;
+  const quiet = palette.quiet;
+
   return (
     <Pressable
       onPress={open}
       accessibilityRole="link"
       accessibilityLabel={`${flag ? `${flag}. ` : ""}${section}. ${title}`}
-      style={[styles.page, { height, backgroundColor: palette.ink }]}
+      style={[styles.page, { height, backgroundColor: palette.paper, borderBottomColor: palette.rule }]}
     >
-      {uri ? (
-        <>
-          {/* Blurred fill behind, so the frame is never empty. */}
+      <View style={[styles.photo, { height: height * 0.52, backgroundColor: palette.paper2 }]}>
+        {uri ? (
           <Image
             source={{ uri }}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
-            blurRadius={28}
-            cachePolicy="memory-disk"
-            recyclingKey={`${article.slug}:bg`}
-            accessible={false}
-          />
-          <View style={[StyleSheet.absoluteFill, styles.dim]} />
-          {/* The photograph itself, whole and sharp, in the upper part of the page. */}
-          <Image
-            source={{ uri }}
-            style={[styles.photo, { height: height * 0.62 }]}
-            contentFit="contain"
             contentPosition="center"
             transition={150}
             cachePolicy="memory-disk"
@@ -104,40 +93,36 @@ function FeedCardInner({ article, height }: FeedCardProps) {
             accessibilityIgnoresInvertColors
             onError={() => setImageError(true)}
           />
-        </>
-      ) : null}
-
-      {/* The fade under the caption, for readable white text on any photo. */}
-      <Svg width="100%" height="100%" style={StyleSheet.absoluteFill} pointerEvents="none">
-        <Defs>
-          <LinearGradient id="fade" x1="0" y1="0" x2="0" y2="1">
-            <Stop offset="0.45" stopColor="#000" stopOpacity="0" />
-            <Stop offset="0.75" stopColor="#000" stopOpacity="0.6" />
-            <Stop offset="1" stopColor="#000" stopOpacity="0.92" />
-          </LinearGradient>
-        </Defs>
-        <Rect width="100%" height="100%" fill="url(#fade)" />
-      </Svg>
-
-      <View style={styles.foot}>
-        <Text style={styles.kicker} numberOfLines={1}>
-          {flag ? <Text style={styles.flag}>{flag} · </Text> : null}
-          {section.toUpperCase()}
-          <Text style={styles.dot}> · </Text>
-          {timeAgo(article.published_at)}
-        </Text>
-
-        <Text style={[styles.title, ne && article.title_ne ? styles.titleNe : null]} numberOfLines={4}>
-          {title}
-        </Text>
-
-        {caption ? (
-          <Text style={[styles.caption, ne && article.excerpt_ne ? styles.captionNe : null]} numberOfLines={2}>
-            {caption}
-          </Text>
         ) : null}
+      </View>
 
-        <View style={styles.actions}>
+      <View style={styles.body}>
+        <View>
+          <Text style={[styles.kicker, { color: quiet }]} numberOfLines={1}>
+            {flag ? <Text style={{ color: palette.red }}>{flag} · </Text> : null}
+            <Text style={{ color: palette.red }}>{section.toUpperCase()}</Text>
+            {" · "}
+            {timeAgo(article.published_at)}
+          </Text>
+
+          <Text
+            style={[styles.title, { color: ink }, ne && article.title_ne ? styles.titleNe : null]}
+            numberOfLines={4}
+          >
+            {title}
+          </Text>
+
+          {caption ? (
+            <Text
+              style={[styles.caption, { color: quiet }, ne && article.excerpt_ne ? styles.captionNe : null]}
+              numberOfLines={3}
+            >
+              {caption}
+            </Text>
+          ) : null}
+        </View>
+
+        <View style={[styles.actions, { borderTopColor: palette.rule }]}>
           <Pressable
             onPress={save}
             hitSlop={12}
@@ -149,16 +134,16 @@ function FeedCardInner({ article, height }: FeedCardProps) {
             <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
               <Path
                 d="M6 4h12a1 1 0 0 1 1 1v15.5l-7-4-7 4V5a1 1 0 0 1 1-1Z"
-                stroke="#fff"
+                stroke={ink}
                 strokeWidth={1.7}
-                fill={saved ? "#fff" : "none"}
+                fill={saved ? ink : "none"}
                 strokeLinejoin="round"
               />
             </Svg>
-            <Text style={styles.actionText}>{saved ? "Saved" : "Save"}</Text>
+            <Text style={[styles.actionText, { color: ink }]}>{saved ? "Saved" : "Save"}</Text>
           </Pressable>
 
-          <Text style={styles.readMore}>Tap to read</Text>
+          <Text style={[styles.readMore, { color: quiet }]}>Tap to read</Text>
 
           <Pressable
             onPress={() => void share()}
@@ -170,12 +155,12 @@ function FeedCardInner({ article, height }: FeedCardProps) {
             <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
               <Path
                 d="M14 5l7 6.5-7 6.5v-4c-5 0-8.5 1.5-11 5 1-5.5 4-10 11-11V5Z"
-                stroke="#fff"
+                stroke={ink}
                 strokeWidth={1.7}
                 strokeLinejoin="round"
               />
             </Svg>
-            <Text style={styles.actionText}>Share</Text>
+            <Text style={[styles.actionText, { color: ink }]}>Share</Text>
           </Pressable>
         </View>
       </View>
@@ -191,56 +176,40 @@ export function FeedCardSkeleton({ height }: { height: number }) {
   return <View style={[styles.page, { height, backgroundColor: palette.paper2 }]} />;
 }
 
-/* Soft shadow under white text, for the brightest photographs. */
-const SHADOW = {
-  textShadowColor: "rgba(0,0,0,0.5)",
-  textShadowOffset: { width: 0, height: 1 },
-  textShadowRadius: 6,
-};
-
 const styles = StyleSheet.create({
-  page: { width: "100%", overflow: "hidden", justifyContent: "flex-end" },
-  dim: { backgroundColor: "rgba(0,0,0,0.35)" },
-  photo: { position: "absolute", top: 0, left: 0, right: 0 },
-  foot: { paddingHorizontal: 18, paddingBottom: 14 },
+  page: { width: "100%", overflow: "hidden", borderBottomWidth: StyleSheet.hairlineWidth },
+  photo: { width: "100%", overflow: "hidden" },
+  body: { flex: 1, justifyContent: "space-between", paddingHorizontal: 18, paddingTop: 16, paddingBottom: 10 },
   kicker: {
-    color: "rgba(255,255,255,0.92)",
     fontFamily: fontFamilies.sansMedium,
-    fontSize: 12.5,
-    letterSpacing: 0.5,
-    ...SHADOW,
+    fontSize: 12,
+    letterSpacing: 0.6,
   },
-  flag: { color: "#ff4d55" },
-  dot: { color: "rgba(255,255,255,0.7)" },
   title: {
-    color: "#fff",
     fontFamily: fontFamilies.serifMedium,
-    fontSize: 28,
-    lineHeight: 33,
+    fontSize: 26,
+    lineHeight: 31,
     letterSpacing: -0.3,
     marginTop: 8,
-    ...SHADOW,
   },
-  titleNe: { fontFamily: fontFamilies.devaMedium, fontSize: 25, lineHeight: 36 },
+  titleNe: { fontFamily: fontFamilies.devaMedium, fontSize: 23, lineHeight: 34 },
   caption: {
-    color: "rgba(255,255,255,0.88)",
     fontFamily: fontFamilies.serifRegular,
     fontSize: 15.5,
     lineHeight: 22,
-    marginTop: 8,
-    ...SHADOW,
+    marginTop: 10,
   },
   captionNe: { fontFamily: fontFamilies.devaRegular, fontSize: 15, lineHeight: 24 },
   actions: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: 14,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
   action: { flexDirection: "row", alignItems: "center", gap: 6, minHeight: 36 },
-  actionText: { color: "#fff", fontFamily: fontFamilies.sansMedium, fontSize: 13.5 },
+  actionText: { fontFamily: fontFamilies.sansMedium, fontSize: 13.5 },
   readMore: {
-    color: "rgba(255,255,255,0.6)",
     fontFamily: fontFamilies.sansMedium,
     fontSize: 11,
     letterSpacing: 1.2,
