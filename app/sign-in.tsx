@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Linking,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -180,7 +179,7 @@ function SignInScreenActive() {
   return (
     <KeyboardAvoidingView
       style={[styles.screen, { backgroundColor: palette.paper }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior="padding"
     >
       <View style={[styles.topBar, { borderBottomColor: palette.rule }]}>
         <Pressable onPress={back} hitSlop={12} accessibilityRole="button" accessibilityLabel="Go back" style={styles.backBtn}>

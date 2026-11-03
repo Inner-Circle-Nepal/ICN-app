@@ -1,5 +1,5 @@
 import React from "react";
-import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
@@ -152,7 +152,7 @@ export function BottomNav() {
         {
           backgroundColor: palette.paper,
           borderTopColor: palette.rule,
-          paddingBottom: Math.max(insets.bottom, Platform.OS === "ios" ? 10 : 8),
+          paddingBottom: Math.max(insets.bottom, 10),
         },
       ]}
       accessibilityRole="tablist"

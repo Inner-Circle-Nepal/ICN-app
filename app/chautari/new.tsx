@@ -2,7 +2,6 @@ import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -138,7 +137,7 @@ function NewRoomScreenActive() {
   return (
     <KeyboardAvoidingView
       style={[styles.screen, { backgroundColor: palette.paper }]}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior="padding"
     >
       <View style={[styles.topBar, { borderBottomColor: palette.rule }]}>
         <Pressable

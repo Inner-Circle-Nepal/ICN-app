@@ -8,33 +8,54 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "ios": { "simulator": true },
-      "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_CHAUTARI_API_URL": "https://api.icn.news" }
+      "ios": {
+        "simulator": true
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_CHAUTARI_API_URL": "https://api.icn.news"
+      }
     },
-
     "preview": {
       "distribution": "internal",
       "ios": {
         "simulator": false,
         "resourceClass": "m-medium"
       },
-      "android": { "buildType": "apk" },
-      "env": { "EXPO_PUBLIC_CHAUTARI_API_URL": "https://api.icn.news" }
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_CHAUTARI_API_URL": "https://api.icn.news"
+      }
     },
-
     "production": {
       "environment": "production",
       "autoIncrement": true,
-      "ios": { "resourceClass": "m-medium" },
-      "android": { "buildType": "app-bundle" },
-      "env": { "EXPO_PUBLIC_CHAUTARI_API_URL": "https://api.icn.news" }
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "EXPO_PUBLIC_CHAUTARI_API_URL": "https://api.icn.news"
+      }
+    },
+    "production-apk": {
+      "extends": "production",
+      "android": {
+        "buildType": "apk"
+      }
     }
   },
-
   "submit": {
     "production": {
-      "ios": { "ascAppId": "6828508148" }
+      "ios": {
+        "ascAppId": "6828508148"
+      }
     }
   }
 }
