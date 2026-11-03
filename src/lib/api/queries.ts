@@ -83,6 +83,17 @@ function escapeLikePattern(value: string): string {
 const CATEGORIES_TTL_MS = 60_000;
 let categoriesCache: { at: number; promise: Promise<Category[]> } | null = null;
 
+/**
+ * Sections the app does not offer, even though the newsroom's database still
+ * lists them. Removing one here takes it out of every menu, chip row and
+ * picker at once, on iOS and Android alike.
+ */
+export const HIDDEN_CATEGORY_SLUGS: ReadonlySet<string> = new Set(["investigations"]);
+
+function visibleCategories(list: Category[]): Category[] {
+  return list.filter((c) => !HIDDEN_CATEGORY_SLUGS.has(c.slug));
+}
+
 export function getCategories(): Promise<Category[]> {
   if (categoriesCache && Date.now() - categoriesCache.at < CATEGORIES_TTL_MS) {
     return categoriesCache.promise;
@@ -104,7 +115,7 @@ async function fetchCategories(): Promise<Category[]> {
     .select(`${CATEGORY_BASE}, is_locked, locked_blurb`)
     .order("sort_order");
 
-  if (!error && data) return data as Category[];
+  if (!error && data) return visibleCategories(data as Category[]);
 
   if (error && error.code !== UNDEFINED_COLUMN) {
     throw new Error(error.message);
@@ -117,7 +128,9 @@ async function fetchCategories(): Promise<Category[]> {
 
   if (baseError) throw new Error(baseError.message);
   if (!base) return [];
-  return base.map((c) => ({ ...c, is_locked: false, locked_blurb: null })) as Category[];
+  return visibleCategories(
+    base.map((c) => ({ ...c, is_locked: false, locked_blurb: null })) as Category[],
+  );
 }
 
 export async function getCategoryBySlug(slug: string): Promise<Category | null> {

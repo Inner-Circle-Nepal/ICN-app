@@ -54,7 +54,7 @@ export const persistOptions = {
   persister: queryPersister,
   maxAge: DAY_MS,
   /* Bump when a persisted response's shape changes, so stale shapes are discarded. */
-  buster: "2026-10-home-v3",
+  buster: "2026-11-no-investigations",
   dehydrateOptions: {
     shouldDehydrateQuery: (query: Query) =>
       query.state.status === "success" && PERSISTED_KEYS.has(String(query.queryKey[0])),
