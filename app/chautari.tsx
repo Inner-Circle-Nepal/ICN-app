@@ -155,15 +155,25 @@ function HostPromptSignedIn() {
   return <HostPrompt signedIn={Boolean(isSignedIn)} />;
 }
 
+/**
+ * Signed-in readers already have "+ OPEN A ROOM" fixed at the foot of the
+ * screen, so the prompt points to it instead of adding a second button that
+ * does the same thing. Signed-out readers do not see that bar, so they get
+ * the sign-in button here.
+ */
 function HostPrompt({ signedIn }: { signedIn: boolean }) {
   const router = useRouter();
   return (
     <EmptyState
       kicker="Nothing on air"
       title="Host a room in Chautari"
-      description="No one is live right now. Start a conversation about the news, and listeners can join you."
-      actionLabel={signedIn ? "Host a room" : "Sign in to host a room"}
-      onAction={() => router.push(signedIn ? "/chautari/new" : "/sign-in")}
+      description={
+        signedIn
+          ? "No one is live right now. Tap Open a room below to start a conversation about the news."
+          : "No one is live right now. Sign in to start a conversation about the news."
+      }
+      actionLabel={signedIn ? undefined : "Sign in to host a room"}
+      onAction={signedIn ? undefined : () => router.push("/sign-in")}
     />
   );
 }
