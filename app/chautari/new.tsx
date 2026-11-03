@@ -15,8 +15,10 @@ import { useAuth, useUser } from "@clerk/clerk-expo";
 import Svg, { Path } from "react-native-svg";
 
 import { ChautariError, openRoom } from "@/lib/api/chautari";
+import { isClerkConfigured } from "@/constants/config";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
+import { ErrorState } from "@/components/ErrorState";
 
 const MAX_HEADLINE = 140;
 const MAX_STANDFIRST = 500;
@@ -33,7 +35,55 @@ const MAX_STANDFIRST = 500;
  * server-side when the form submits; a reader without one gets a plain refusal
  * rather than a disabled button they cannot explain.
  */
+/**
+ * Outer guard: `useAuth`/`useUser` throw outside <ClerkProvider>, and the
+ * provider mounts only when `isClerkConfigured`. Keep the hooks inside the
+ * inner component that is only ever mounted in configured builds; otherwise
+ * an unconfigured APK crashes the moment this screen opens.
+ */
 export default function NewRoomScreen() {
+  if (!isClerkConfigured) {
+    return <NewRoomUnavailable />;
+  }
+  return <NewRoomScreenActive />;
+}
+
+function NewRoomUnavailable() {
+  const router = useRouter();
+  const { palette } = useTheme();
+  return (
+    <View style={{ flex: 1, backgroundColor: palette.paper }}>
+      <View style={[styles.topBar, { borderBottomColor: palette.rule }]}>
+        <Pressable
+          onPress={() =>
+            router.canGoBack() ? router.back() : router.replace("/chautari")
+          }
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
+          style={styles.backBtn}
+        >
+          <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
+            <Path
+              d="M19 12H5M11 6l-6 6 6 6"
+              stroke={palette.ink}
+              strokeWidth={1.6}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </Svg>
+          <Text style={[styles.backLabel, { color: palette.ink }]}>Back</Text>
+        </Pressable>
+      </View>
+      <ErrorState
+        title="Hosting is unavailable"
+        message="This build has no account system configured, so a Chautari room cannot be opened from here."
+      />
+    </View>
+  );
+}
+
+function NewRoomScreenActive() {
   const router = useRouter();
   const { palette } = useTheme();
   const { getToken } = useAuth();

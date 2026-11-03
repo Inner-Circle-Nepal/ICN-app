@@ -77,7 +77,39 @@ interface ListenerRow {
 
 const LISTENER_COLUMNS = 5;
 
+/**
+ * Outer guard: isolate Clerk hooks under <ClerkProvider>.
+ *
+ * `_layout.tsx` only mounts <ClerkProvider> when `isClerkConfigured`. If this
+ * screen called `useAuth` / `useUser` directly, an unconfigured build would
+ * crash the moment the room screen mounts. The outer function renders a
+ * static fallback with no hooks for that case; the actual room UI lives in
+ * `ChautariRoomScreenActive`, which is mounted only when it is safe.
+ */
 export default function ChautariRoomScreen() {
+  if (!isClerkConfigured) {
+    return <ChautariUnavailable />;
+  }
+  return <ChautariRoomScreenActive />;
+}
+
+function ChautariUnavailable() {
+  const router = useRouter();
+  const back = () => {
+    if (router.canGoBack()) router.back();
+    else router.replace("/chautari");
+  };
+  return (
+    <Shell onBack={back} onShare={null} title="Chautari">
+      <ErrorState
+        title="Conversations are unavailable"
+        message="This build has no account system configured."
+      />
+    </Shell>
+  );
+}
+
+function ChautariRoomScreenActive() {
   const router = useRouter();
   const params = useLocalSearchParams<{
     slug?: string | string[];
@@ -231,17 +263,6 @@ export default function ChautariRoomScreen() {
   const ticker = useOnAirTicker();
 
   /* ------------------------------------------------------------ gating */
-
-  if (!isClerkConfigured) {
-    return (
-      <Shell onBack={leaveAndBack} onShare={null} title={title}>
-        <ErrorState
-          title="Conversations are unavailable"
-          message="This build has no account system configured."
-        />
-      </Shell>
-    );
-  }
 
   if (!liveAudioSupported) {
     return (
