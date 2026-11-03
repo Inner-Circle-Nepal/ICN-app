@@ -4,9 +4,16 @@ import { Platform } from "react-native";
  * Keeps Chautari audio going in the background on Android.
  *
  * iOS does this through the "audio" background mode in app.json. Android
- * needs a foreground service with an ongoing notification; that service lives
- * in `modules/chautari-audio-service` and is linked into Android builds only.
- * Everywhere else (iOS, web, Expo Go, tests) these calls do nothing.
+ * needs a foreground service with an ongoing notification. That service was
+ * written as `modules/chautari-audio-service` (commit 3205916) and is
+ * temporarily out of the app: Google Play will not accept it until its
+ * foreground-service declaration has a video of the feature on an Android
+ * phone. To bring it back, restore that folder:
+ *
+ *   git checkout 3205916 -- modules/chautari-audio-service
+ *
+ * Until then, and everywhere else (iOS, web, Expo Go, tests), these calls do
+ * nothing: the native module is simply not found.
  */
 
 interface NativeAudioService {

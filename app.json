@@ -104,7 +104,8 @@
             "extraProguardRules": "# LiveKit / WebRTC (Chautari live audio).\n# R8 fails the release build without the first line. The rest are not\n# cosmetic: WebRTC's native layer resolves Java classes and methods through\n# JNI by name, so anything R8 strips or renames becomes an\n# UnsatisfiedLinkError or a silent null at runtime rather than a build\n# error. A minified build that starts and then has no audio is the failure\n# these prevent.\n-dontwarn livekit.org.jni_zero.**\n-keep class livekit.org.webrtc.** { *; }\n-keepclassmembers class livekit.org.webrtc.** { *; }\n-keep class org.webrtc.** { *; }\n-dontwarn org.webrtc.**\n"
           }
         }
-      ]
+      ],
+      "./plugins/withOptionalHardware"
     ],
     "experiments": {
       "typedRoutes": false
