@@ -20,7 +20,6 @@ import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { formatDateTime, timeAgo } from "@/utils/format";
 import { Avatar } from "@/components/chautari/Avatar";
 import { EmptyState } from "@/components/EmptyState";
-import { ErrorState } from "@/components/ErrorState";
 import { initialsFor } from "@/features/chautari/initials";
 
 /**
@@ -80,11 +79,6 @@ export default function ChautariScreen() {
       params: { slug: room.slug, title: room.title, host: room.hostName ?? "" },
     });
 
-  const isEmpty =
-    !rooms.isLoading &&
-    !rooms.isError &&
-    (rooms.data?.length ?? 0) === 0;
-
   return (
     <View style={[styles.screen, { backgroundColor: palette.paper }]}>
       <Masthead palette={palette} />
@@ -126,14 +120,7 @@ export default function ChautariScreen() {
           />
         )}
         ListEmptyComponent={
-          <EmptyFallback
-            isEmpty={isEmpty}
-            isLoading={rooms.isLoading}
-            isError={rooms.isError}
-            onRetry={() => void rooms.refetch()}
-            onHome={() => router.navigate("/")}
-            palette={palette}
-          />
+          <EmptyFallback isLoading={rooms.isLoading} palette={palette} />
         }
       />
 
@@ -144,33 +131,14 @@ export default function ChautariScreen() {
 
 /* -------------------------------------------------------------------------- */
 
-/** The empty / loading / error state that sits between the schedule and nothing. */
-function EmptyFallback({
-  isEmpty,
-  isLoading,
-  isError,
-  onRetry,
-  onHome,
-  palette,
-}: {
-  isEmpty: boolean;
-  isLoading: boolean;
-  isError: boolean;
-  onRetry: () => void;
-  onHome: () => void;
-  palette: ThemePalette;
-}) {
-  if (isEmpty) {
-    return (
-      <EmptyState
-        kicker="Nothing on air"
-        title="No conversations right now"
-        description="Chautari rooms open around the news. When one starts, it will appear here."
-        actionLabel="Back to the front page"
-        onAction={onHome}
-      />
-    );
-  }
+/**
+ * What sits under the schedule when no one is on air: an invitation to host.
+ *
+ * A failed room list shows the same invitation rather than a connection
+ * error: to a reader, both mean "nothing is live", and pull-to-refresh
+ * still retries.
+ */
+function EmptyFallback({ isLoading, palette }: { isLoading: boolean; palette: ThemePalette }) {
   if (isLoading) {
     return (
       <View style={styles.loading}>
@@ -178,16 +146,26 @@ function EmptyFallback({
       </View>
     );
   }
-  if (isError) {
-    return (
-      <ErrorState
-        title="Could not load conversations"
-        message="Check your connection and try again."
-        onRetry={onRetry}
-      />
-    );
-  }
-  return null;
+  return isClerkConfigured ? <HostPromptSignedIn /> : <HostPrompt signedIn={false} />;
+}
+
+/** Mounted only when Clerk is configured, so `useAuth` is safe here. */
+function HostPromptSignedIn() {
+  const { isSignedIn } = useAuth();
+  return <HostPrompt signedIn={Boolean(isSignedIn)} />;
+}
+
+function HostPrompt({ signedIn }: { signedIn: boolean }) {
+  const router = useRouter();
+  return (
+    <EmptyState
+      kicker="Nothing on air"
+      title="Host a room in Chautari"
+      description="No one is live right now. Start a conversation about the news, and listeners can join you."
+      actionLabel={signedIn ? "Host a room" : "Sign in to host a room"}
+      onAction={() => router.push(signedIn ? "/chautari/new" : "/sign-in")}
+    />
+  );
 }
 
 function split(rooms: DiscoverRoom[]): { live: DiscoverRoom[]; scheduled: DiscoverRoom[] } {
