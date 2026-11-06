@@ -165,11 +165,15 @@ function AppShell() {
             animation: "none",
           }}
         >
-          <Stack.Screen name="index" />
-          <Stack.Screen name="explore" />
-          <Stack.Screen name="bookmarks" />
-          <Stack.Screen name="settings" />
-          <Stack.Screen name="chautari" />
+          {/*
+            The five tab routes (index, explore, chautari, bookmarks,
+            settings) live inside a Tabs navigator in `app/(tabs)/` so
+            they stay mounted between switches. Only the group is a
+            Stack screen; the individual tab files are not. Group routes
+            do not appear in URLs, so every existing deep link like
+            `/explore` still works untouched.
+          */}
+          <Stack.Screen name="(tabs)" />
           <Stack.Screen
             name="chautari/new"
             options={{ animation: "slide_from_bottom" }}
