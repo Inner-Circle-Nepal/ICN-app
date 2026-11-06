@@ -51,3 +51,10 @@ yarn-error.*
 
 # ad rebuild output
 marketing/ad/build/
+
+# Custom native modules — Gradle build outputs and caches.
+# Source lives in modules/<name>/android/{build.gradle,src,…}; the build/
+# and .gradle/ dirs under each are generated every `expo run:android`.
+modules/*/android/build/
+modules/*/android/.gradle/
+
