@@ -2,10 +2,12 @@ import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ArticleCard as ArticleCardType } from "@/types/domain";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
-import { IMAGE_WIDTHS, sizedImageUrl } from "@/utils/images";
+import { IMAGE_WIDTHS, placeholderImageUrl, sizedImageUrl } from "@/utils/images";
+import { prefetchArticle } from "@/features/articles/prefetch";
 import { StoryByline, StoryKicker } from "./FeaturedStory";
 
 /**
@@ -27,6 +29,7 @@ export function ArticleCard({
   style,
 }: ArticleCardProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { palette, language } = useTheme();
   const [imageError, setImageError] = useState(false);
 
@@ -35,6 +38,10 @@ export function ArticleCard({
   const useNeExcerpt = language === "ne" && Boolean(article.excerpt_ne);
 
   const openArticle = () => {
+    // Warm the detail cache before navigating — the fetch runs during the
+    // transition animation and resolves into the cache before the detail
+    // screen mounts, replacing the loading skeleton with real content.
+    prefetchArticle(queryClient, article.slug);
     router.push(`/article/${encodeURIComponent(article.slug)}`);
   };
 
@@ -59,6 +66,8 @@ export function ArticleCard({
           >
             <Image
               source={{ uri: sizedImageUrl(article.hero_image, IMAGE_WIDTHS.card) }}
+              placeholder={{ uri: placeholderImageUrl(article.hero_image) }}
+              placeholderContentFit="cover"
               accessibilityLabel={article.hero_alt ?? article.title}
               style={styles.image}
               contentFit="cover"

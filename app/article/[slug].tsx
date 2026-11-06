@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  BackHandler,
   Linking,
   Pressable,
   RefreshControl,
@@ -9,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { Image } from "expo-image";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import Svg, { Path } from "react-native-svg";
 
 import { useArticleDetail } from "@/features/articles/useArticles";
@@ -18,7 +19,7 @@ import { narrationTextFromHtml } from "@/utils/narration";
 import { ListenBar } from "@/components/ListenBar";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
-import { IMAGE_WIDTHS, sizedImageUrl } from "@/utils/images";
+import { IMAGE_WIDTHS, placeholderImageUrl, sizedImageUrl } from "@/utils/images";
 import { editions, site } from "@/constants/site";
 import { ArticleBylineBand, AuthorBioCard } from "@/components/AuthorMetadata";
 import { ShareBar } from "@/components/ShareBar";
@@ -108,13 +109,40 @@ export default function ArticleDetailScreen() {
     [scrollY],
   );
 
-  const handleBack = () => {
+  const handleBack = useCallback(() => {
     if (router.canGoBack()) {
       router.back();
     } else {
       router.replace("/");
     }
-  };
+  }, [router]);
+
+  /*
+   * Android hardware back button.
+   *
+   * Only intercept when the stack is empty — otherwise return `false` and
+   * let react-native-screens' native stack run its default pop. That keeps
+   * ordinary back (article → feed) on the native code path it has always
+   * used and only adds the "go to /" fallback that would otherwise exit the
+   * app on a cold-launched deep link.
+   *
+   * `useFocusEffect` (rather than plain `useEffect`) attaches the listener
+   * only while this screen has focus. A background article screen below the
+   * stack has no business handling back presses, and plain effects can race
+   * in dev under Fast Refresh.
+   *
+   * iOS does not fire `hardwareBackPress`, so this is a no-op there.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener("hardwareBackPress", () => {
+        if (router.canGoBack()) return false;
+        router.replace("/");
+        return true;
+      });
+      return () => sub.remove();
+    }, [router]),
+  );
 
   const hasNepaliTranslation = Boolean(
     article && (article.title_ne || article.excerpt_ne || article.body_ne),
@@ -368,6 +396,8 @@ export default function ArticleDetailScreen() {
                 >
                   <Image
                     source={{ uri: sizedImageUrl(article.hero_image, IMAGE_WIDTHS.hero) }}
+                    placeholder={{ uri: placeholderImageUrl(article.hero_image) }}
+                    placeholderContentFit="cover"
                     accessibilityLabel={article.hero_alt || article.title}
                     style={styles.heroImage}
                     contentFit="cover"

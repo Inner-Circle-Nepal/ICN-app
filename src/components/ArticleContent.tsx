@@ -17,7 +17,7 @@ import {
   type InlineSpan,
 } from "@/utils/htmlParser";
 import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
-import { IMAGE_WIDTHS, sizedImageUrl } from "@/utils/images";
+import { IMAGE_WIDTHS, placeholderImageUrl, sizedImageUrl } from "@/utils/images";
 
 /**
  * Long-form native article body renderer.
@@ -439,6 +439,8 @@ function InlineFigureBlock({
       >
         <Image
           source={{ uri: sizedImageUrl(block.src, IMAGE_WIDTHS.hero) }}
+          placeholder={{ uri: placeholderImageUrl(block.src) }}
+          placeholderContentFit="cover"
           accessibilityLabel={block.alt || block.caption || "Article illustration"}
           style={styles.figureImage}
           contentFit={ratio ? "contain" : "cover"}

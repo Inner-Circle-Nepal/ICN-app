@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { memo, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -18,7 +18,7 @@ import {
 import { useTags } from "@/features/search/useSearch";
 import { useForexRates, useNepseSnapshot } from "@/features/market/useMarket";
 import { useTheme } from "@/hooks/useTheme";
-import { fontFamilies, spacing } from "@/theme/tokens";
+import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { AppHeader } from "@/components/AppHeader";
 import { SectionRule } from "@/components/SectionRule";
 import { ArticleCard } from "@/components/ArticleCard";
@@ -72,6 +72,35 @@ export default function ExploreScreen() {
     return list;
   }, [articlesQuery.data?.pages]);
 
+  /*
+   * The list header is memoised as an element so it does not rebuild on every
+   * parent render (e.g. when the infinite feed pushes a new page, which used
+   * to churn every button, SVG icon, and nested view above the article list).
+   * Scroll performance also improves: FlatList no longer sees a new
+   * ListHeaderComponent reference between frames.
+   */
+  const listHeader = useMemo(
+    () => (
+      <ExploreListHeader
+        palette={palette}
+        showTools={showTools}
+        setShowTools={setShowTools}
+        forexData={forexQuery.data}
+        nepseData={nepseQuery.data}
+        selectedSlug={selectedSlug}
+        activeCategoryName={activeCategory?.name ?? null}
+      />
+    ),
+    [
+      palette,
+      showTools,
+      forexQuery.data,
+      nepseQuery.data,
+      selectedSlug,
+      activeCategory?.name,
+    ],
+  );
+
   const isRefreshing =
     articlesQuery.isRefetching && !articlesQuery.isFetchingNextPage;
 
@@ -109,138 +138,7 @@ export default function ExploreScreen() {
             void articlesQuery.fetchNextPage();
           }
         }}
-        ListHeaderComponent={
-          <View style={styles.headerContainer}>
-            {/* Page Title + Search Trigger */}
-            <View
-              style={[styles.heroHeader, { borderBottomColor: palette.ink }]}
-            >
-              <Text style={[styles.kicker, { color: palette.quiet }]}>
-                Discovery · Sections & desks
-              </Text>
-              <Text style={[styles.title, { color: palette.ink }]}>
-                Explore the Newsroom
-              </Text>
-
-              <Pressable
-                onPress={() => router.push("/search")}
-                accessibilityRole="search"
-                accessibilityLabel="Search articles, reporters, and topics"
-                style={[
-                  styles.searchLauncher,
-                  {
-                    borderColor: palette.rule2,
-                    backgroundColor: palette.paper2,
-                  },
-                ]}
-              >
-                <Svg width={15} height={15} viewBox="0 0 24 24" fill="none">
-                  <Circle
-                    cx={11}
-                    cy={11}
-                    r={7}
-                    stroke={palette.quiet}
-                    strokeWidth={1.6}
-                  />
-                  <Path
-                    d="m16.5 16.5 4.5 4.5"
-                    stroke={palette.quiet}
-                    strokeWidth={1.6}
-                    strokeLinecap="round"
-                  />
-                </Svg>
-                <Text
-                  style={[styles.searchPlaceholder, { color: palette.quiet }]}
-                >
-                  Search headlines, dispatches, or topics…
-                </Text>
-              </Pressable>
-            </View>
-
-            {/* Market & Remittance Reference Tools */}
-            <View style={styles.toolsSection}>
-              <View style={styles.toolsBar}>
-                <Pressable
-                  onPress={() =>
-                    setShowTools(showTools === "forex" ? "none" : "forex")
-                  }
-                  style={[
-                    styles.toolButton,
-                    {
-                      borderColor:
-                        showTools === "forex" ? palette.ink : palette.rule2,
-                      backgroundColor:
-                        showTools === "forex" ? palette.paper2 : "transparent",
-                    },
-                  ]}
-                >
-                  <Text style={[styles.toolButtonText, { color: palette.ink }]}>
-                    {showTools === "forex"
-                      ? "Hide NRB Remittance Desk"
-                      : "NRB Forex & Remittance Converter"}
-                  </Text>
-                </Pressable>
-
-                <Pressable
-                  onPress={() =>
-                    setShowTools(showTools === "nepse" ? "none" : "nepse")
-                  }
-                  style={[
-                    styles.toolButton,
-                    {
-                      borderColor:
-                        showTools === "nepse" ? palette.ink : palette.rule2,
-                      backgroundColor:
-                        showTools === "nepse" ? palette.paper2 : "transparent",
-                    },
-                  ]}
-                >
-                  <Text style={[styles.toolButtonText, { color: palette.ink }]}>
-                    {showTools === "nepse"
-                      ? "Hide NEPSE Board"
-                      : "Live NEPSE Market Board"}
-                  </Text>
-                </Pressable>
-              </View>
-
-              {showTools === "forex" && forexQuery.data ? (
-                <View style={styles.toolPanel}>
-                  <ForexWidget rates={forexQuery.data} />
-                </View>
-              ) : null}
-
-              {showTools === "nepse" && nepseQuery.data ? (
-                <View style={styles.toolPanel}>
-                  <NepseBoard snapshot={nepseQuery.data} />
-                </View>
-              ) : null}
-            </View>
-
-            {/* Active Section Feed Header */}
-            <View style={styles.feedHeader}>
-              <SectionRule
-                title={
-                  activeCategory
-                    ? `${activeCategory.name} desk`
-                    : "Section feed"
-                }
-                cta="Full section page"
-                onPressCta={() =>
-                  router.push(`/category/${encodeURIComponent(selectedSlug)}`)
-                }
-              />
-            </View>
-
-            {/* Show NEPSE Board automatically when NEPSE desk is selected */}
-            {selectedSlug === "nepse" &&
-            showTools !== "nepse" &&
-            nepseQuery.data ? (
-              <View style={styles.nepseInline}>
-                <NepseBoard snapshot={nepseQuery.data} />
-              </View>
-            ) : null}
-          </View>
-        }
+        ListHeaderComponent={listHeader}
         ListEmptyComponent={
           articlesQuery.isLoading ? (
             <View style={styles.loaderWrap}>
@@ -320,6 +218,155 @@ export default function ExploreScreen() {
     </View>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+
+type ShowTools = "none" | "forex" | "nepse";
+type ForexData = React.ComponentProps<typeof ForexWidget>["rates"];
+type NepseData = React.ComponentProps<typeof NepseBoard>["snapshot"];
+
+interface ExploreListHeaderProps {
+  palette: ThemePalette;
+  showTools: ShowTools;
+  setShowTools: (v: ShowTools) => void;
+  forexData: ForexData | undefined;
+  nepseData: NepseData | undefined;
+  selectedSlug: string;
+  activeCategoryName: string | null;
+}
+
+/**
+ * The static-ish top of the Explore screen: discovery kicker, search
+ * launcher, forex / NEPSE tool toggles, section rule, and the inline NEPSE
+ * board for the NEPSE desk. Everything above the article list.
+ *
+ * Memoised because its only legitimate reasons to re-render are theme,
+ * tool-toggle, forex/nepse data, and the current section — not the arrival
+ * of a new infinite-feed page, which is the parent's most frequent update.
+ */
+const ExploreListHeader = memo(function ExploreListHeader({
+  palette,
+  showTools,
+  setShowTools,
+  forexData,
+  nepseData,
+  selectedSlug,
+  activeCategoryName,
+}: ExploreListHeaderProps) {
+  const router = useRouter();
+  return (
+    <View style={styles.headerContainer}>
+      {/* Page Title + Search Trigger */}
+      <View style={[styles.heroHeader, { borderBottomColor: palette.ink }]}>
+        <Text style={[styles.kicker, { color: palette.quiet }]}>
+          Discovery · Sections & desks
+        </Text>
+        <Text style={[styles.title, { color: palette.ink }]}>
+          Explore the Newsroom
+        </Text>
+
+        <Pressable
+          onPress={() => router.push("/search")}
+          accessibilityRole="search"
+          accessibilityLabel="Search articles, reporters, and topics"
+          style={[
+            styles.searchLauncher,
+            {
+              borderColor: palette.rule2,
+              backgroundColor: palette.paper2,
+            },
+          ]}
+        >
+          <Svg width={15} height={15} viewBox="0 0 24 24" fill="none">
+            <Circle cx={11} cy={11} r={7} stroke={palette.quiet} strokeWidth={1.6} />
+            <Path
+              d="m16.5 16.5 4.5 4.5"
+              stroke={palette.quiet}
+              strokeWidth={1.6}
+              strokeLinecap="round"
+            />
+          </Svg>
+          <Text style={[styles.searchPlaceholder, { color: palette.quiet }]}>
+            Search headlines, dispatches, or topics…
+          </Text>
+        </Pressable>
+      </View>
+
+      {/* Market & Remittance Reference Tools */}
+      <View style={styles.toolsSection}>
+        <View style={styles.toolsBar}>
+          <Pressable
+            onPress={() => setShowTools(showTools === "forex" ? "none" : "forex")}
+            style={[
+              styles.toolButton,
+              {
+                borderColor:
+                  showTools === "forex" ? palette.ink : palette.rule2,
+                backgroundColor:
+                  showTools === "forex" ? palette.paper2 : "transparent",
+              },
+            ]}
+          >
+            <Text style={[styles.toolButtonText, { color: palette.ink }]}>
+              {showTools === "forex"
+                ? "Hide NRB Remittance Desk"
+                : "NRB Forex & Remittance Converter"}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={() => setShowTools(showTools === "nepse" ? "none" : "nepse")}
+            style={[
+              styles.toolButton,
+              {
+                borderColor:
+                  showTools === "nepse" ? palette.ink : palette.rule2,
+                backgroundColor:
+                  showTools === "nepse" ? palette.paper2 : "transparent",
+              },
+            ]}
+          >
+            <Text style={[styles.toolButtonText, { color: palette.ink }]}>
+              {showTools === "nepse"
+                ? "Hide NEPSE Board"
+                : "Live NEPSE Market Board"}
+            </Text>
+          </Pressable>
+        </View>
+
+        {showTools === "forex" && forexData ? (
+          <View style={styles.toolPanel}>
+            <ForexWidget rates={forexData} />
+          </View>
+        ) : null}
+
+        {showTools === "nepse" && nepseData ? (
+          <View style={styles.toolPanel}>
+            <NepseBoard snapshot={nepseData} />
+          </View>
+        ) : null}
+      </View>
+
+      {/* Active Section Feed Header */}
+      <View style={styles.feedHeader}>
+        <SectionRule
+          title={activeCategoryName ? `${activeCategoryName} desk` : "Section feed"}
+          cta="Full section page"
+          onPressCta={() =>
+            router.push(`/category/${encodeURIComponent(selectedSlug)}`)
+          }
+        />
+      </View>
+
+      {/* Show NEPSE Board automatically when NEPSE desk is selected */}
+      {selectedSlug === "nepse" && showTools !== "nepse" && nepseData ? (
+        <View style={styles.nepseInline}>
+          <NepseBoard snapshot={nepseData} />
+        </View>
+      ) : null}
+    </View>
+  );
+});
 
 const styles = StyleSheet.create({
   screen: {

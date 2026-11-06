@@ -52,13 +52,25 @@ export class ChautariError extends Error {
 
 export type GetToken = () => Promise<string | null>;
 
+/**
+ * Per-request timeout for Chautari API calls.
+ *
+ * The upstream used to be 20s. In practice a healthy server responds in well
+ * under a second; a 20s wait is only ever hit when the backend is unreachable.
+ * During an outage that long wait, multiplied by React Query's default three
+ * retries, left readers staring at a spinner for close to a minute before the
+ * error state rendered. Six seconds is short enough to fail fast to a clear
+ * "offline" message and long enough to tolerate a slow handset on 3G.
+ */
+const CHAUTARI_FETCH_TIMEOUT_MS = 6_000;
+
 async function call<T>(
   path: string,
   init: RequestInit,
   getToken?: GetToken,
 ): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20_000);
+  const timer = setTimeout(() => controller.abort(), CHAUTARI_FETCH_TIMEOUT_MS);
 
   let headers: Record<string, string> = { "content-type": "application/json" };
   if (getToken) {

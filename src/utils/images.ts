@@ -25,6 +25,12 @@ const STORAGE_RENDER_PATH = "/storage/v1/render/image/public/";
 
 /** Widths requested from the renderer; one of a few values so the CDN caches well. */
 export const IMAGE_WIDTHS = {
+  /**
+   * Low-quality image placeholder — ~2 KB at quality 30. Delivered instantly
+   * from the CDN edge and shown under the full-resolution image while the
+   * larger file downloads, the same trick Next.js uses for `placeholder="blur"`.
+   */
+  lqip: 20,
   /** 88×66pt wire-row thumbnail. */
   thumb: 400,
   /** Full-bleed card or related-story image. */
@@ -74,4 +80,18 @@ export function sizedImageUrl(
   parsed.searchParams.set("width", String(width));
   parsed.searchParams.set("quality", String(quality));
   return parsed.toString();
+}
+
+/**
+ * The low-quality placeholder URL for a given image — a 20-pixel-wide,
+ * quality-30 version roughly 2 KB in size. Fetched instantly from the CDN
+ * edge, held under the full-resolution image while the larger file loads.
+ *
+ * Returns `undefined` for images this project cannot transform (external
+ * wire-service photos keep the stock "no placeholder" behaviour).
+ */
+export function placeholderImageUrl(
+  url: string | null | undefined,
+): string | undefined {
+  return sizedImageUrl(url, IMAGE_WIDTHS.lqip, 30);
 }

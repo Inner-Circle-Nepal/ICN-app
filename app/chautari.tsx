@@ -10,7 +10,7 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth, useUser } from "@clerk/clerk-expo";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { discoverRooms, type DiscoverRoom } from "@/lib/api/chautari";
@@ -68,6 +68,21 @@ export default function ChautariScreen() {
     queryFn: discoverRooms,
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
+    /*
+     * Fail fast to a visible error instead of spinning through the default
+     * three retries. The Chautari API itself uses a 6s timeout per request;
+     * one retry 1.5s later caps the total loading window at ~14s in the worst
+     * case rather than the ~60s the default surfaced during the recent outage.
+     */
+    retry: 1,
+    retryDelay: 1500,
+    /*
+     * While a refetch is in flight after the first successful load, keep the
+     * previous rooms on screen rather than flashing a spinner — a one-minute
+     * poll that briefly blanks the schedule feels much worse than one that
+     * updates in place.
+     */
+    placeholderData: keepPreviousData,
   });
 
   const { live, scheduled } = useMemo(() => split(rooms.data ?? []), [rooms.data]);

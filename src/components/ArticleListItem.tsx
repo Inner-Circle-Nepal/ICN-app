@@ -2,10 +2,12 @@ import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View, type ViewStyle } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import type { ArticleCard as ArticleCardType } from "@/types/domain";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
-import { IMAGE_WIDTHS, sizedImageUrl } from "@/utils/images";
+import { IMAGE_WIDTHS, placeholderImageUrl, sizedImageUrl } from "@/utils/images";
+import { prefetchArticle } from "@/features/articles/prefetch";
 import { StoryByline, StoryKicker } from "./FeaturedStory";
 
 /**
@@ -33,6 +35,7 @@ export function ArticleListItem({
   style,
 }: ArticleListItemProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { palette, language } = useTheme();
   const [thumbError, setThumbError] = useState(false);
 
@@ -41,6 +44,8 @@ export function ArticleListItem({
   const hasThumb = variant === "compact" && Boolean(article.hero_image) && !thumbError;
 
   const openArticle = () => {
+    // Warm the detail cache before navigating.
+    prefetchArticle(queryClient, article.slug);
     router.push(`/article/${encodeURIComponent(article.slug)}`);
   };
 
@@ -154,6 +159,8 @@ export function ArticleListItem({
             >
               <Image
                 source={{ uri: sizedImageUrl(article.hero_image, IMAGE_WIDTHS.thumb) }}
+                placeholder={{ uri: placeholderImageUrl(article.hero_image) }}
+                placeholderContentFit="cover"
                 accessibilityLabel={article.hero_alt ?? article.title}
                 style={styles.thumbImage}
                 contentFit="cover"

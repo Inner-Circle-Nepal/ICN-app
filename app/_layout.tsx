@@ -33,6 +33,7 @@ import { registerLiveKitGlobals } from "@/lib/livekit/platform";
 import { CLERK_PUBLISHABLE_KEY, isClerkConfigured } from "@/constants/config";
 import { clerkTokenCache } from "@/lib/auth/tokenCache";
 import { persistOptions, queryClient } from "@/lib/query/queryClient";
+import { prewarmSharedQueries } from "@/lib/query/prewarm";
 import { ThemeProvider, useAppTheme } from "@/theme/ThemeContext";
 import { BookmarksProvider } from "@/features/bookmarks/BookmarksContext";
 import { BottomNav } from "@/components/BottomNav";
@@ -72,6 +73,17 @@ registerLiveKitGlobals();
 function AppShell() {
   const router = useRouter();
   const { palette, resolvedMode } = useAppTheme();
+
+  /*
+   * Warm the handful of queries every secondary tab will ask for, once the
+   * persist provider above has had a chance to restore anything cached from
+   * last session. Without this, each tab switch kicks off its own query chain
+   * on arrival and shows a ~400 ms blank gap before the tab looks "real" —
+   * see src/lib/query/prewarm.ts for the specific queries.
+   */
+  useEffect(() => {
+    prewarmSharedQueries(queryClient);
+  }, []);
 
   // Deep link & notification navigation handler
   useEffect(() => {
@@ -139,7 +151,18 @@ function AppShell() {
           screenOptions={{
             headerShown: false,
             contentStyle: { backgroundColor: palette.paper },
-            animation: "fade",
+            /*
+             * The default is "none" because every sub-screen below (article,
+             * profile, Chautari room, category, sign-in …) sets its own
+             * explicit slide animation. Only the five tab routes (index,
+             * explore, bookmarks, settings, chautari) inherit this default —
+             * and for tabs a fade introduces ~300 ms of opacity interpolation
+             * between tap and visible content, which readers feel as the
+             * difference between "snappy" and "a bit slow". Instant switch is
+             * what the icon flip already promised — the transition should
+             * honour it.
+             */
+            animation: "none",
           }}
         >
           <Stack.Screen name="index" />
@@ -173,7 +196,17 @@ function AppShell() {
           />
           <Stack.Screen
             name="article/[slug]"
-            options={{ animation: "slide_from_right" }}
+            options={{
+              animation: "slide_from_right",
+              /*
+               * Explicitly opt the article screen into the swipe-from-edge
+               * gesture. react-native-screens' default varies by platform
+               * and by the screen's animation; stating it here guarantees
+               * the Android gesture-nav back (and iOS edge-swipe back) are
+               * wired into the native stack's pop path.
+               */
+              gestureEnabled: true,
+            }}
           />
           <Stack.Screen
             name="category/[slug]"

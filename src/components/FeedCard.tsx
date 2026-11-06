@@ -2,6 +2,7 @@ import React, { memo, useCallback, useState } from "react";
 import { Platform, Pressable, Share, StyleSheet, Text, View } from "react-native";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { useQueryClient } from "@tanstack/react-query";
 import * as Haptics from "expo-haptics";
 import Svg, { Path } from "react-native-svg";
 import type { ArticleCard } from "@/types/domain";
@@ -9,7 +10,8 @@ import { useBookmarks } from "@/features/bookmarks/BookmarksContext";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
 import { canonicalArticleUrl, timeAgo } from "@/utils/format";
-import { IMAGE_WIDTHS, sizedImageUrl } from "@/utils/images";
+import { IMAGE_WIDTHS, placeholderImageUrl, sizedImageUrl } from "@/utils/images";
+import { prefetchArticle } from "@/features/articles/prefetch";
 
 /**
  * One story in the home feed: a full-screen vertical (9:16-style) page,
@@ -32,6 +34,7 @@ interface FeedCardProps {
 
 function FeedCardInner({ article, height }: FeedCardProps) {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { language, palette } = useTheme();
   const { isBookmarked, toggleBookmark } = useBookmarks();
   const [imageError, setImageError] = useState(false);
@@ -47,8 +50,12 @@ function FeedCardInner({ article, height }: FeedCardProps) {
   const flag = article.is_live ? "LIVE" : article.is_breaking ? "BREAKING" : null;
 
   const open = useCallback(() => {
+    // Warm the detail cache before navigating — the fetch runs during the
+    // transition animation and the detail screen finds the data already
+    // resolved on mount.
+    prefetchArticle(queryClient, article.slug);
     router.push(`/article/${encodeURIComponent(article.slug)}`);
-  }, [router, article.slug]);
+  }, [router, article.slug, queryClient]);
 
   const save = useCallback(() => {
     if (Platform.OS !== "web") void Haptics.selectionAsync().catch(() => {});
@@ -114,6 +121,8 @@ function FeedCardInner({ article, height }: FeedCardProps) {
           {uri ? (
             <Image
               source={{ uri }}
+              placeholder={{ uri: placeholderImageUrl(article.hero_image) }}
+              placeholderContentFit="cover"
               style={StyleSheet.absoluteFill}
               contentFit="cover"
               contentPosition="center"

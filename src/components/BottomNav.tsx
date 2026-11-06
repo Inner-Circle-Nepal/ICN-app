@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -25,16 +25,38 @@ export function BottomNav() {
   const { palette } = useTheme();
   const { bookmarks } = useBookmarks();
 
+  /*
+   * Optimistic active tab.
+   *
+   * Without this the icon only flips to its "selected" style once the router
+   * has finished committing the new route — on a fresh tab that can be
+   * 200–500 ms of visible lag between the tap and the icon responding. Taps
+   * on polished apps (Economist, NYT) feel instant because the icon updates
+   * the moment you press, independent of when the content lands.
+   *
+   * On press we remember the tapped href. `activeHref` below prefers it over
+   * the pathname until the pathname catches up — at which point the two are
+   * equal and the derivation collapses back to pathname-driven behaviour.
+   * The stored `pendingHref` is then stale but harmless; the next tap
+   * replaces it.
+   */
+  const [pendingHref, setPendingHref] = useState<string | null>(null);
+
   if (!TAB_ROUTES.has(pathname)) {
     return null;
   }
+
+  // Once navigation commits, the optimistic value and the real one match —
+  // from then on the pathname rules until the next tap.
+  const activeHref =
+    pendingHref && pendingHref !== pathname ? pendingHref : pathname;
 
   const tabs = [
     {
       key: "home",
       label: "Home",
       href: "/" as const,
-      active: pathname === "/",
+      active: activeHref === "/",
       icon: (color: string, active: boolean) => (
         <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
           <Path
@@ -51,7 +73,7 @@ export function BottomNav() {
       key: "explore",
       label: "Newsroom",
       href: "/explore" as const,
-      active: pathname === "/explore",
+      active: activeHref === "/explore",
       /*
        * A folded newspaper, not a magnifier: search is the header's job, and
        * a magnifier here read as a second search button.
@@ -84,7 +106,7 @@ export function BottomNav() {
       key: "chautari",
       label: "Chautari",
       href: "/chautari" as const,
-      active: pathname === "/chautari",
+      active: activeHref === "/chautari",
       /*
        * Concentric arcs: sound leaving a mouth, and the shape of people
        * sitting around a chautari. Drawn rather than an emoji so it inherits
@@ -113,7 +135,7 @@ export function BottomNav() {
       key: "bookmarks",
       label: "Saved",
       href: "/bookmarks" as const,
-      active: pathname === "/bookmarks",
+      active: activeHref === "/bookmarks",
       badgeCount: bookmarks.length,
       icon: (color: string, active: boolean) => (
         <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
@@ -131,7 +153,7 @@ export function BottomNav() {
       key: "settings",
       label: "Settings",
       href: "/settings" as const,
-      active: pathname === "/settings",
+      active: activeHref === "/settings",
       icon: (color: string, active: boolean) => (
         <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
           <Path
@@ -165,12 +187,18 @@ export function BottomNav() {
             onPress={() => {
               if (tab.active) return;
               /*
+               * Set the optimistic pending href FIRST so the icon flips to
+               * selected state this same frame. `navigate` kicks off the
+               * actual route change afterwards; the pending href is cleared
+               * in the effect above once `pathname` catches up.
+               *
                * `navigate` either pushes the tab or unwinds to it if it is
                * already on the stack, so switching tabs repeatedly does not
                * pile up screens. It replaces `replace`, which threw the
                * stack away and left the Android back button with nowhere to
                * go but out of the app.
                */
+              setPendingHref(tab.href);
               router.navigate(tab.href);
             }}
             accessibilityRole="tab"
