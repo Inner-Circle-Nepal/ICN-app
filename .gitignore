@@ -48,3 +48,6 @@ yarn-error.*
 
 # typescript
 *.tsbuildinfo
+
+# ad rebuild output
+marketing/ad/build/
