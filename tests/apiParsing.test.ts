@@ -143,7 +143,15 @@ describe("sizedImageUrl", () => {
     const out = sizedImageUrl(storage, IMAGE_WIDTHS.thumb);
     expect(out).toContain("/storage/v1/render/image/public/media/2026/hero.jpg");
     expect(out).toContain("width=400");
-    expect(out).toContain("quality=70");
+    // Default quality is now size-appropriate (see QUALITY_FOR in utils/images).
+    // Thumbnail width takes the lowest default because a 400 px image rendered
+    // at ~88 px hides compression artefacts the eye could otherwise catch.
+    expect(out).toContain("quality=50");
+  });
+
+  it("honours an explicit quality override from the caller", () => {
+    const out = sizedImageUrl(storage, IMAGE_WIDTHS.thumb, 85);
+    expect(out).toContain("quality=85");
   });
 
   it("leaves a third-party hero untouched", () => {
