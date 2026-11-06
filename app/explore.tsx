@@ -9,7 +9,7 @@ import {
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
-import Svg, { Circle, Path, Rect } from "react-native-svg";
+import Svg, { Circle, Path } from "react-native-svg";
 
 import {
   useCategories,
@@ -32,15 +32,14 @@ import type { ArticleCard as ArticleCardType } from "@/types/domain";
  *
  * Provides:
  *   - Quick Search bar launcher
- *   - Interactive directory of all 8 real categories (`nepal`, `investigations`,
- *     `diaspora`, `immigration`, `nepse`, `technology`, `culture`, `sports`)
+ *   - Section strip in the header to switch the story list below
  *   - Popular Topic Tags from the live `tags` table
  *   - Collapsible NRB Forex & Remittance Converter + NEPSE Market Board
  *   - Live infinite feed for the currently selected category
  */
 export default function ExploreScreen() {
   const router = useRouter();
-  const { palette, language } = useTheme();
+  const { palette } = useTheme();
 
   const categoriesQuery = useCategories();
   const tagsQuery = useTags();
@@ -48,7 +47,9 @@ export default function ExploreScreen() {
   const nepseQuery = useNepseSnapshot();
 
   const [selectedSlug, setSelectedSlug] = useState<string>("nepal");
-  const [showTools, setShowTools] = useState<"none" | "forex" | "nepse">("none");
+  const [showTools, setShowTools] = useState<"none" | "forex" | "nepse">(
+    "none",
+  );
 
   const articlesQuery = useInfiniteCategoryArticles(selectedSlug);
 
@@ -88,6 +89,7 @@ export default function ExploreScreen() {
         categories={categories}
         activeCategorySlug={selectedSlug}
         onSelectCategory={(slug) => setSelectedSlug(slug)}
+        showSearch={false}
       />
 
       <FlatList
@@ -111,10 +113,7 @@ export default function ExploreScreen() {
           <View style={styles.headerContainer}>
             {/* Page Title + Search Trigger */}
             <View
-              style={[
-                styles.heroHeader,
-                { borderBottomColor: palette.ink },
-              ]}
+              style={[styles.heroHeader, { borderBottomColor: palette.ink }]}
             >
               <Text style={[styles.kicker, { color: palette.quiet }]}>
                 Discovery · Sections & desks
@@ -156,91 +155,6 @@ export default function ExploreScreen() {
                   Search headlines, dispatches, or topics…
                 </Text>
               </Pressable>
-            </View>
-
-            {/* Editorial Desks Grid */}
-            <View style={styles.desksSection}>
-              <SectionRule
-                title="Editorial sections"
-                cta={`${categories.length} desks`}
-              />
-              <View
-                style={[
-                  styles.desksGrid,
-                  { borderColor: palette.rule },
-                ]}
-              >
-                {categories.map((cat) => {
-                  const isSelected = cat.slug === selectedSlug;
-                  return (
-                    <Pressable
-                      key={cat.slug}
-                      onPress={() => setSelectedSlug(cat.slug)}
-                      onLongPress={() =>
-                        router.push(`/category/${encodeURIComponent(cat.slug)}`)
-                      }
-                      style={[
-                        styles.deskCell,
-                        {
-                          borderColor: palette.rule,
-                          backgroundColor: isSelected
-                            ? palette.paper2
-                            : "transparent",
-                        },
-                      ]}
-                    >
-                      <View style={styles.deskTitleRow}>
-                        <Text
-                          style={[
-                            styles.deskName,
-                            {
-                              color: palette.ink,
-                              textDecorationLine: isSelected
-                                ? "underline"
-                                : "none",
-                            },
-                          ]}
-                        >
-                          {language === "ne" && cat.name_ne
-                            ? cat.name_ne
-                            : cat.name}
-                        </Text>
-                        {cat.is_locked ? (
-                          <Svg
-                            width={10}
-                            height={10}
-                            viewBox="0 0 12 12"
-                            fill="none"
-                          >
-                            <Rect
-                              x={2}
-                              y={5.5}
-                              width={8}
-                              height={5.5}
-                              rx={1}
-                              stroke={palette.quiet}
-                              strokeWidth={1.2}
-                            />
-                            <Path
-                              d="M3.8 5.5V3.8a2.2 2.2 0 0 1 4.4 0v1.7"
-                              stroke={palette.quiet}
-                              strokeWidth={1.2}
-                            />
-                          </Svg>
-                        ) : null}
-                      </View>
-                      {cat.description ? (
-                        <Text
-                          numberOfLines={2}
-                          style={[styles.deskDesc, { color: palette.quiet }]}
-                        >
-                          {cat.description}
-                        </Text>
-                      ) : null}
-                    </Pressable>
-                  );
-                })}
-              </View>
             </View>
 
             {/* Market & Remittance Reference Tools */}
@@ -301,34 +215,6 @@ export default function ExploreScreen() {
                 </View>
               ) : null}
             </View>
-
-            {/* Topic Tags */}
-            {tagsQuery.data && tagsQuery.data.length > 0 ? (
-              <View style={styles.tagsSection}>
-                <SectionRule title="Topics in the news" />
-                <View style={styles.tagsRow}>
-                  {tagsQuery.data.map((t) => (
-                    <Pressable
-                      key={t.slug}
-                      onPress={() =>
-                        router.push({
-                          pathname: "/search",
-                          params: { tag: t.slug },
-                        })
-                      }
-                      style={[
-                        styles.tagChip,
-                        { borderColor: palette.rule2 },
-                      ]}
-                    >
-                      <Text style={[styles.tagText, { color: palette.ink }]}>
-                        #{t.name}
-                      </Text>
-                    </Pressable>
-                  ))}
-                </View>
-              </View>
-            ) : null}
 
             {/* Active Section Feed Header */}
             <View style={styles.feedHeader}>
@@ -397,11 +283,38 @@ export default function ExploreScreen() {
           </View>
         )}
         ListFooterComponent={
-          articlesQuery.isFetchingNextPage ? (
-            <View style={styles.loaderWrap}>
-              <ActivityIndicator color={palette.ink} />
-            </View>
-          ) : undefined
+          <View>
+            {articlesQuery.isFetchingNextPage ? (
+              <View style={styles.loaderWrap}>
+                <ActivityIndicator color={palette.ink} />
+              </View>
+            ) : null}
+
+            {/* Topic Tags, at the foot of the page below the section's stories */}
+            {tagsQuery.data && tagsQuery.data.length > 0 ? (
+              <View style={styles.tagsSection}>
+                <SectionRule title="Topics in the news" />
+                <View style={styles.tagsRow}>
+                  {tagsQuery.data.map((t) => (
+                    <Pressable
+                      key={t.slug}
+                      onPress={() =>
+                        router.push({
+                          pathname: "/search",
+                          params: { tag: t.slug },
+                        })
+                      }
+                      style={[styles.tagChip, { borderColor: palette.rule2 }]}
+                    >
+                      <Text style={[styles.tagText, { color: palette.ink }]}>
+                        #{t.name}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
+          </View>
         }
       />
     </View>
@@ -449,40 +362,6 @@ const styles = StyleSheet.create({
   searchPlaceholder: {
     fontFamily: fontFamilies.serifRegular,
     fontSize: 15.5,
-  },
-  desksSection: {
-    marginTop: 24,
-  },
-  desksGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    borderTopWidth: 1,
-    borderLeftWidth: 1,
-  },
-  deskCell: {
-    width: "50%",
-    padding: 12,
-    borderRightWidth: 1,
-    borderBottomWidth: 1,
-  },
-  deskTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 6,
-  },
-  deskName: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 12,
-    fontWeight: "500",
-    letterSpacing: 1.3,
-    textTransform: "uppercase",
-  },
-  deskDesc: {
-    fontFamily: fontFamilies.serifRegular,
-    fontSize: 13.5,
-    lineHeight: 19,
-    marginTop: 5,
   },
   toolsSection: {
     marginTop: 20,

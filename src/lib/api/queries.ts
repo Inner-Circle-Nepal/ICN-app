@@ -12,8 +12,6 @@ import {
   FULL_COLUMNS_NE,
 } from "@/constants/config";
 import { getPublicSupabase } from "./supabase";
-import { getForexRates } from "./forex";
-import { getNepseIndex } from "./nepse";
 
 /**
  * Typed data read layer for Inner Circle Nepal Mobile.
@@ -77,7 +75,38 @@ function escapeLikePattern(value: string): string {
 /*  Categories, Tags & Authors                                                 */
 /* -------------------------------------------------------------------------- */
 
-export async function getCategories(): Promise<Category[]> {
+/**
+ * Categories change rarely and several loaders ask for them in the same
+ * moment (the home feed and each desk it fetches). Callers within a minute
+ * share one request; a failure is not remembered.
+ */
+const CATEGORIES_TTL_MS = 60_000;
+let categoriesCache: { at: number; promise: Promise<Category[]> } | null = null;
+
+/**
+ * Sections the app does not offer, even though the newsroom's database still
+ * lists them. Removing one here takes it out of every menu, chip row and
+ * picker at once, on iOS and Android alike.
+ */
+export const HIDDEN_CATEGORY_SLUGS: ReadonlySet<string> = new Set(["investigations"]);
+
+function visibleCategories(list: Category[]): Category[] {
+  return list.filter((c) => !HIDDEN_CATEGORY_SLUGS.has(c.slug));
+}
+
+export function getCategories(): Promise<Category[]> {
+  if (categoriesCache && Date.now() - categoriesCache.at < CATEGORIES_TTL_MS) {
+    return categoriesCache.promise;
+  }
+  const promise = fetchCategories();
+  categoriesCache = { at: Date.now(), promise };
+  promise.catch(() => {
+    if (categoriesCache?.promise === promise) categoriesCache = null;
+  });
+  return promise;
+}
+
+async function fetchCategories(): Promise<Category[]> {
   const sb = getPublicSupabase();
   if (!sb) throw new Error("Supabase is not configured.");
 
@@ -86,7 +115,7 @@ export async function getCategories(): Promise<Category[]> {
     .select(`${CATEGORY_BASE}, is_locked, locked_blurb`)
     .order("sort_order");
 
-  if (!error && data) return data as Category[];
+  if (!error && data) return visibleCategories(data as Category[]);
 
   if (error && error.code !== UNDEFINED_COLUMN) {
     throw new Error(error.message);
@@ -99,7 +128,9 @@ export async function getCategories(): Promise<Category[]> {
 
   if (baseError) throw new Error(baseError.message);
   if (!base) return [];
-  return base.map((c) => ({ ...c, is_locked: false, locked_blurb: null })) as Category[];
+  return visibleCategories(
+    base.map((c) => ({ ...c, is_locked: false, locked_blurb: null })) as Category[],
+  );
 }
 
 export async function getCategoryBySlug(slug: string): Promise<Category | null> {
@@ -434,27 +465,22 @@ export async function searchArticles(
 /*  Editorial Homepage Composite Feed                                          */
 /* -------------------------------------------------------------------------- */
 
+/**
+ * The front page's running order: the lead, the stories the editors placed
+ * beside it, then the latest wire. Two requests in parallel.
+ *
+ * Markets, desks and "most read" are not part of it: the home feed shows
+ * only stories, and those sections live in Newsroom. (The feed used to wait
+ * for Nepal Rastra Bank's 2–3 s forex API and fetch desks one after the
+ * other, which held a cold launch on placeholders for ~6 s.)
+ */
 export async function getHomeFeed(): Promise<HomeFeedData> {
-  const [featured, latest, trending, categories, forexRates, nepseReading] =
-    await Promise.all([
-      getFeaturedArticles(5),
-      getLatestArticles(18),
-      getTrendingArticles(5),
-      getCategories(),
-      getForexRates().catch(() => []),
-      getNepseIndex().catch(() => ({ index: null, isOpen: false })),
-    ]);
+  const [featured, latest] = await Promise.all([
+    getFeaturedArticles(5),
+    getLatestArticles(18),
+  ]);
 
-  const immigration = await getArticlesByCategory("immigration", 3).catch(() => []);
-
-  const investigationsCategory =
-    categories.find((c) => c.slug === "investigations") ?? null;
-  const investigationStories =
-    investigationsCategory && !investigationsCategory.is_locked
-      ? await getArticlesByCategory("investigations", 3).catch(() => [])
-      : [];
-
-  // Replicate exact homepage editorial curation logic from `site/src/app/(site)/page.tsx`
+  // Same curation as `site/src/app/(site)/page.tsx`.
   const [firstFeatured, ...restFeatured] = featured;
   const lead = firstFeatured ?? latest[0] ?? null;
 
@@ -467,28 +493,11 @@ export async function getHomeFeed(): Promise<HomeFeedData> {
   const alsoLeading = rail.slice(0, 3);
 
   const used = new Set([lead?.slug, ...alsoLeading.map((a) => a.slug)].filter(Boolean));
-  const wire = latest.filter((a) => !used.has(a.slug));
-
-  const secondLead = wire.slice(0, 2);
-  const railUsed = new Set(investigationStories.map((a) => a.slug));
-  const grid = wire
-    .slice(2)
-    .filter((a) => !railUsed.has(a.slug))
-    .slice(0, 8);
 
   return {
     lead,
-    secondLead,
     alsoLeading,
-    latestGrid: grid.slice(0, 4),
-    latestBriefs: grid.slice(4, 8),
-    immigration,
-    trending,
-    investigationsCategory,
-    investigationStories,
-    categories,
-    forexRates,
-    nepseReading,
+    latest: latest.filter((a) => !used.has(a.slug)),
     fetchedAt: new Date().toISOString(),
   };
 }

@@ -6,7 +6,7 @@ import * as SplashScreen from "expo-splash-screen";
 import * as Linking from "expo-linking";
 import { notificationsModule } from "@/lib/notifications/module";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
 /*
  * Fonts are imported one weight at a time.
  *
@@ -32,11 +32,13 @@ import { ClerkProvider } from "@clerk/clerk-expo";
 import { registerLiveKitGlobals } from "@/lib/livekit/platform";
 import { CLERK_PUBLISHABLE_KEY, isClerkConfigured } from "@/constants/config";
 import { clerkTokenCache } from "@/lib/auth/tokenCache";
-import { queryClient } from "@/lib/query/queryClient";
+import { persistOptions, queryClient } from "@/lib/query/queryClient";
 import { ThemeProvider, useAppTheme } from "@/theme/ThemeContext";
 import { BookmarksProvider } from "@/features/bookmarks/BookmarksContext";
 import { BottomNav } from "@/components/BottomNav";
-import { extractNotificationPath } from "@/lib/notifications/push";
+import { MiniRoomBar } from "@/components/chautari/MiniRoomBar";
+import { ActiveRoomProvider } from "@/features/chautari/ActiveRoom";
+import { extractNotificationPath, syncPushRegistration } from "@/lib/notifications/push";
 import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
 
 LogBox.ignoreLogs(["Invalid DOM property `transform-origin`"]);
@@ -99,6 +101,22 @@ function AppShell() {
         const path = extractNotificationPath(response);
         navigateToUrl(path);
       });
+
+      /*
+       * The listener above only hears taps while the app is running. A tap
+       * that LAUNCHED the app arrived before it was attached, so it is read
+       * back here — otherwise a breaking-news alert opened from a closed app
+       * lands on the front page instead of the story. Cleared once handled so
+       * a later remount does not open the same story again.
+       */
+      void N.getLastNotificationResponseAsync().then((response) => {
+        if (!response) return;
+        navigateToUrl(extractNotificationPath(response));
+        void N.clearLastNotificationResponseAsync();
+      });
+
+      // Keep the newsroom's list current: tokens rotate, and an offline opt-in needs retrying.
+      void syncPushRegistration();
       return () => {
         urlSub.remove();
         notifSub.remove();
@@ -167,6 +185,7 @@ function AppShell() {
           />
         </Stack>
       </View>
+      <MiniRoomBar />
       <BottomNav />
     </SafeAreaView>
   );
@@ -195,13 +214,15 @@ export default function RootLayout() {
   }
 
   const tree = (
-    <QueryClientProvider client={queryClient}>
+    <PersistQueryClientProvider client={queryClient} persistOptions={persistOptions}>
       <ThemeProvider>
         <BookmarksProvider>
-          <AppShell />
+          <ActiveRoomProvider>
+            <AppShell />
+          </ActiveRoomProvider>
         </BookmarksProvider>
       </ThemeProvider>
-    </QueryClientProvider>
+    </PersistQueryClientProvider>
   );
 
   return (

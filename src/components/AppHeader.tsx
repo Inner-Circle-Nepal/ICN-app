@@ -3,22 +3,53 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   View,
 } from "react-native";
 import { useRouter } from "expo-router";
 import Svg, { Circle, Path } from "react-native-svg";
 import type { Category } from "@/types/domain";
 import { useTheme } from "@/hooks/useTheme";
-import { fontFamilies, spacing } from "@/theme/tokens";
+import { spacing } from "@/theme/tokens";
 import { Logo } from "./Logo";
 import { CategoryChip } from "./CategoryChip";
+import { isClerkConfigured } from "@/constants/config";
+import { useAuth } from "@clerk/clerk-expo";
+
+/**
+ * The reader's account: their profile when signed in, sign-in otherwise.
+ * A separate component so Clerk's hook only runs in builds that have Clerk.
+ */
+function AccountButton() {
+  const router = useRouter();
+  const { palette } = useTheme();
+  const { isSignedIn } = useAuth();
+  return (
+    <Pressable
+      onPress={() => router.push(isSignedIn ? "/profile" : "/sign-in")}
+      hitSlop={10}
+      accessibilityRole="button"
+      accessibilityLabel={isSignedIn ? "Your profile" : "Sign in"}
+      style={styles.iconBtn}
+    >
+      <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+        <Circle cx={12} cy={8} r={4} stroke={palette.ink} strokeWidth={1.8} />
+        <Path
+          d="M4.5 20.5c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5"
+          stroke={palette.ink}
+          strokeWidth={1.8}
+          strokeLinecap="round"
+        />
+      </Svg>
+    </Pressable>
+  );
+}
 
 /**
  * Editorial Masthead (`AppHeader`).
  *
  * Mirrors `site/src/components/layout/Header.tsx`:
- *   - Top masthead row: ICN Logo + Search icon + EN/नेपाली language toggle
+ *   - Top masthead row: ICN Logo, then Search and the reader's account.
+ *     The EN/नेपाली switch lives in Settings ("Primary Reading Language").
  *   - Optional horizontally scrolling section strip separated by 1px rules
  */
 
@@ -27,6 +58,8 @@ interface AppHeaderProps {
   activeCategorySlug?: string;
   onSelectCategory?: (slug: string) => void;
   showSectionBar?: boolean;
+  /** Off on screens that already have their own search box (Newsroom). */
+  showSearch?: boolean;
 }
 
 export function AppHeader({
@@ -34,13 +67,10 @@ export function AppHeader({
   activeCategorySlug,
   onSelectCategory,
   showSectionBar = true,
+  showSearch = true,
 }: AppHeaderProps) {
   const router = useRouter();
-  const { palette, language, setLanguage } = useTheme();
-
-  const toggleLanguage = () => {
-    setLanguage(language === "en" ? "ne" : "en");
-  };
+  const { palette } = useTheme();
 
   return (
     <View style={[styles.wrapper, { backgroundColor: palette.paper }]}>
@@ -59,63 +89,27 @@ export function AppHeader({
         </Pressable>
 
         <View style={styles.rightActions}>
-          <Pressable
-            onPress={toggleLanguage}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel={
-              language === "en" ? "Switch reading language to Nepali" : "Switch reading language to English"
-            }
-            style={styles.langToggle}
-          >
-            <Text
-              style={[
-                styles.langText,
-                {
-                  color: language === "en" ? palette.ink : palette.quiet,
-                  textDecorationLine: language === "en" ? "underline" : "none",
-                },
-              ]}
+          {showSearch ? (
+            <Pressable
+              onPress={() => router.push("/search")}
+              hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel="Search articles"
+              style={styles.iconBtn}
             >
-              EN
-            </Text>
-            <Text style={[styles.langDivider, { color: palette.rule2 }]}>/</Text>
-            <Text
-              style={[
-                styles.langTextDeva,
-                {
-                  color: language === "ne" ? palette.ink : palette.quiet,
-                  textDecorationLine: language === "ne" ? "underline" : "none",
-                },
-              ]}
-            >
-              ने
-            </Text>
-          </Pressable>
+              <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+                <Circle cx={11} cy={11} r={7} stroke={palette.ink} strokeWidth={1.8} />
+                <Path
+                  d="m16.5 16.5 4.5 4.5"
+                  stroke={palette.ink}
+                  strokeWidth={1.8}
+                  strokeLinecap="round"
+                />
+              </Svg>
+            </Pressable>
+          ) : null}
 
-          <Pressable
-            onPress={() => router.push("/search")}
-            hitSlop={10}
-            accessibilityRole="button"
-            accessibilityLabel="Search articles"
-            style={styles.iconBtn}
-          >
-            <Svg width={18} height={18} viewBox="0 0 24 24" fill="none">
-              <Circle
-                cx={11}
-                cy={11}
-                r={7}
-                stroke={palette.ink}
-                strokeWidth={1.6}
-              />
-              <Path
-                d="m16.5 16.5 4.5 4.5"
-                stroke={palette.ink}
-                strokeWidth={1.6}
-                strokeLinecap="round"
-              />
-            </Svg>
-          </Pressable>
+          {isClerkConfigured ? <AccountButton /> : null}
         </View>
       </View>
 
@@ -168,26 +162,7 @@ const styles = StyleSheet.create({
   rightActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
-  },
-  langToggle: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingVertical: 4,
-  },
-  langText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11,
-    letterSpacing: 0.8,
-  },
-  langTextDeva: {
-    fontFamily: fontFamilies.devaMedium,
-    fontSize: 12,
-  },
-  langDivider: {
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 11,
+    gap: 18,
   },
   iconBtn: {
     padding: 4,

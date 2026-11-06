@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -258,6 +257,45 @@ function ProfileScreenActive() {
     );
   }, [signOut, router]);
 
+  /**
+   * Delete the account, which App Store guideline 5.1.1(v) requires of any app
+   * that lets people create one. `user.delete()` is Clerk's own deletion; it
+   * needs "Allow users to delete their accounts" left on in the Clerk dashboard.
+   */
+  const confirmDeleteAccount = useCallback(() => {
+    if (!user) return;
+    Alert.alert(
+      "Delete your account?",
+      "This permanently deletes your Inner Circle Nepal account, here and on icn.news. You can still read everything without one.",
+      [
+        { text: "Keep my account", style: "cancel" },
+        {
+          text: "Delete account",
+          style: "destructive",
+          onPress: () => {
+            setNotice(null);
+            setError(null);
+            void user
+              .delete()
+              .then(() => signOut())
+              .then(
+                () => router.replace("/settings"),
+                (e: unknown) => {
+                  const errs = (e as { errors?: { longMessage?: string; message?: string }[] })
+                    ?.errors;
+                  setError(
+                    errs?.[0]?.longMessage ||
+                      errs?.[0]?.message ||
+                      "Could not delete your account. Please try again or email newsroom@icn.news.",
+                  );
+                },
+              );
+          },
+        },
+      ],
+    );
+  }, [user, signOut, router]);
+
   /* ------------------------------------------------------------- gates */
 
   if (!isClerkConfigured) {
@@ -297,7 +335,7 @@ function ProfileScreenActive() {
     <Shell onBack={back}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
+        behavior="padding"
       >
         <ScrollView
           contentContainerStyle={[styles.body, { paddingBottom: Math.max(32, insets.bottom + 24) }]}
@@ -530,6 +568,15 @@ function ProfileScreenActive() {
             Reading Inner Circle Nepal never needs an account. Signing out leaves the front page,
             search and your saved stories exactly as they are on this device.
           </Text>
+
+          <Pressable
+            onPress={confirmDeleteAccount}
+            accessibilityRole="button"
+            accessibilityLabel="Delete your account permanently"
+            style={({ pressed }) => [styles.photoBtn, pressed && styles.pressed]}
+          >
+            <Text style={[styles.photoBtnText, { color: palette.red }]}>Delete account</Text>
+          </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
     </Shell>

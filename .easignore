@@ -1,0 +1,56 @@
+# EAS Build uploads everything not listed here. When this file exists EAS reads it
+# instead of .gitignore, so it repeats .gitignore and adds what builds never need.
+
+# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
+
+# dependencies
+node_modules/
+
+# Expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Native
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+
+# Native projects. This app uses Continuous Native Generation: android/ and
+# ios/ are produced by `expo prebuild` from app.json and the config plugins,
+# so they are build output, not source. The local android/ tree is over 1 GB.
+#
+# Nothing hand-written lives in there. The one thing that used to — the
+# LiveKit/WebRTC ProGuard keep rules, without which R8 fails the release
+# build — is now declared as `extraProguardRules` under expo-build-properties
+# in app.json, so prebuild regenerates it. Do not edit android/ by hand; a
+# change made there is lost at the next prebuild and is invisible to CI.
+/android/
+/ios/
+
+# Metro
+.metro-health-check*
+
+# debug
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+
+# macOS
+.DS_Store
+*.pem
+
+# local env files (never commit real keys)
+.env
+.env*.local
+
+# typescript
+*.tsbuildinfo
+
+# Marketing material (ad videos and their sources): not part of the app
+marketing/

@@ -25,9 +25,12 @@ import {
 import {
   END_MESSAGES,
   isBusy,
-  useChautariRoom,
+  type ChautariRoomState,
   type RoomMember,
 } from "@/features/chautari/useChautariRoom";
+import { useActiveRoom } from "@/features/chautari/ActiveRoom";
+import { submitContactMessage } from "@/lib/api/newsletter";
+import { getBlockedIdentities, setBlockedIdentities } from "@/lib/storage/chautariBlocks";
 import { isClerkConfigured } from "@/constants/config";
 import { isLiveKitAvailable } from "@/lib/livekit/platform";
 import { useTheme } from "@/hooks/useTheme";
@@ -76,6 +79,28 @@ interface ListenerRow {
 }
 
 const LISTENER_COLUMNS = 5;
+
+/** What the screen shows before the shared room exists: a join about to start. */
+const noop = () => {};
+const IDLE_ROOM: ChautariRoomState = {
+  phase: "idle",
+  error: null,
+  endReason: null,
+  identity: null,
+  role: null,
+  canPublish: false,
+  micEnabled: false,
+  micError: null,
+  micBlocked: false,
+  dismissMicError: noop,
+  members: [],
+  listenerCount: 0,
+  connect: noop,
+  leave: noop,
+  toggleMic: noop,
+  retry: noop,
+  setBlocked: noop,
+};
 
 /**
  * Outer guard: isolate Clerk hooks under <ClerkProvider>.
@@ -129,7 +154,15 @@ function ChautariRoomScreenActive() {
   const displayName = user?.fullName?.trim() || user?.firstName?.trim() || null;
   const localImageUrl = user?.hasImage ? user.imageUrl : null;
 
-  const room = useChautariRoom(slug, getToken, displayName);
+  /*
+   * The connection lives in ActiveRoomProvider, not here, so going Back keeps
+   * the reader in the room (see MiniRoomBar). This screen only asks to enter
+   * and reads the shared state; before that state exists it shows an idle
+   * room, which renders the same "Checking your access" as a fresh join.
+   */
+  const { active, enter, leave: leaveRoom, room: sharedRoom } = useActiveRoom();
+  const room: ChautariRoomState =
+    active?.slug === slug && sharedRoom ? sharedRoom : IDLE_ROOM;
 
   const [handRaised, setHandRaisedState] = useState(false);
   const [handBusy, setHandBusy] = useState(false);
@@ -145,17 +178,29 @@ function ChautariRoomScreenActive() {
 
   const [liveAudioSupported] = useState(isLiveKitAvailable);
 
-  const { phase, connect } = room;
   useEffect(() => {
     if (!liveAudioSupported || !isSignedIn || !slug) return;
-    if (phase === "idle") connect();
-  }, [liveAudioSupported, isSignedIn, slug, phase, connect]);
+    enter({ slug, hintedTitle, hintedHost });
+  }, [liveAudioSupported, isSignedIn, slug, hintedTitle, hintedHost, enter]);
 
-  const leaveAndBack = useCallback(() => {
-    room.leave();
+  const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace("/chautari");
-  }, [room, router]);
+  }, [router]);
+
+  /* Leave or End room: drop the connection, then go back. */
+  const leaveAndBack = useCallback(() => {
+    leaveRoom();
+    goBack();
+  }, [leaveRoom, goBack]);
+
+  /*
+   * Back keeps a live room running. A room that ended, failed or was left
+   * has nothing to keep, so Back clears it rather than leaving it behind the
+   * mini bar.
+   */
+  const live = room.phase !== "ended" && room.phase !== "error" && room.phase !== "left";
+  const back = live ? goBack : leaveAndBack;
 
   const share = useCallback(async () => {
     try {
@@ -246,6 +291,82 @@ function ChautariRoomScreenActive() {
     ]);
   }, [slug, leaveAndBack]);
 
+  /*
+   * Report and block — available to everyone in the room, not only the host.
+   *
+   * Blocking is local: the reader stops hearing that person, here and in any
+   * later room, without anyone else being told. Reporting goes to the
+   * newsroom through the same contact pipeline as the Settings form, with
+   * the room and the person's identity attached so a moderator can act.
+   */
+  const [blocked, setBlockedState] = useState<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    void getBlockedIdentities().then(setBlockedState);
+  }, []);
+  const setRoomBlocked = room.setBlocked;
+  useEffect(() => {
+    setRoomBlocked(blocked);
+  }, [blocked, setRoomBlocked]);
+
+  const toggleBlock = useCallback((member: RoomMember) => {
+    setBlockedState((prev) => {
+      const next = new Set(prev);
+      if (next.has(member.identity)) next.delete(member.identity);
+      else next.add(member.identity);
+      void setBlockedIdentities(next);
+      return next;
+    });
+  }, []);
+
+  const reporterEmail = user?.primaryEmailAddress?.emailAddress ?? "";
+  const sendReport = useCallback(
+    (member: RoomMember, reason: string) => {
+      void submitContactMessage({
+        name: displayName ?? "Chautari listener",
+        email: reporterEmail,
+        topic: "Chautari report",
+        message: [
+          `Reason: ${reason}`,
+          `Room: ${slug}`,
+          `Reported: ${member.name} (${member.identity})`,
+        ].join("\n"),
+      }).then((res) =>
+        setNotice(
+          res.ok
+            ? "Thank you. The newsroom will review this report within 24 hours."
+            : res.message,
+        ),
+      );
+    },
+    [displayName, reporterEmail, slug],
+  );
+
+  const openSafety = useCallback(
+    (member: RoomMember) => {
+      const isBlocked = blocked.has(member.identity);
+      Alert.alert(member.name, "Report this person to the newsroom, or block them.", [
+        {
+          text: "Report",
+          onPress: () =>
+            Alert.alert("Why are you reporting them?", undefined, [
+              { text: "Abusive or hateful", onPress: () => sendReport(member, "Abusive or hateful") },
+              { text: "Harassment", onPress: () => sendReport(member, "Harassment") },
+              { text: "Spam or scam", onPress: () => sendReport(member, "Spam or scam") },
+              { text: "Something else", onPress: () => sendReport(member, "Something else") },
+              { text: "Cancel", style: "cancel" },
+            ]),
+        },
+        {
+          text: isBlocked ? "Unblock" : "Block",
+          style: isBlocked ? "default" : "destructive",
+          onPress: () => toggleBlock(member),
+        },
+        { text: "Cancel", style: "cancel" },
+      ]);
+    },
+    [blocked, sendReport, toggleBlock],
+  );
+
   const speakers = useMemo(
     () => room.members.filter((m) => m.canPublish),
     [room.members],
@@ -266,7 +387,7 @@ function ChautariRoomScreenActive() {
 
   if (!liveAudioSupported) {
     return (
-      <Shell onBack={leaveAndBack} onShare={null} title={title}>
+      <Shell onBack={back} onShare={null} title={title}>
         <ErrorState
           title="Live audio needs the full app"
           message="This preview build cannot play live conversations. Install Inner Circle Nepal from the app store to listen."
@@ -277,7 +398,7 @@ function ChautariRoomScreenActive() {
 
   if (!isSignedIn) {
     return (
-      <Shell onBack={leaveAndBack} onShare={null} title={title}>
+      <Shell onBack={back} onShare={null} title={title}>
         <ErrorState
           title="Sign in to join"
           message="Chautari rooms are open to readers with an account. Listening is free."
@@ -288,12 +409,12 @@ function ChautariRoomScreenActive() {
   }
 
   if (room.phase === "left") {
-    return <Shell onBack={leaveAndBack} onShare={null} title={title} />;
+    return <Shell onBack={back} onShare={null} title={title} />;
   }
 
   if (room.phase === "error") {
     return (
-      <Shell onBack={leaveAndBack} onShare={null} title={title}>
+      <Shell onBack={back} onShare={null} title={title}>
         <ErrorState
           title="Could not join"
           message={room.error ?? "Please try again."}
@@ -306,7 +427,7 @@ function ChautariRoomScreenActive() {
   if (room.phase === "ended") {
     const copy = END_MESSAGES[room.endReason ?? "unknown"];
     return (
-      <Shell onBack={leaveAndBack} onShare={null} title={title}>
+      <Shell onBack={back} onShare={null} title={title}>
         <ErrorState
           title={copy.title}
           message={copy.message}
@@ -325,7 +446,7 @@ function ChautariRoomScreenActive() {
   const onAir = room.phase === "connected" && room.identity ? ticker : null;
 
   return (
-    <Shell onBack={leaveAndBack} onShare={share} title={title}>
+    <Shell onBack={back} onShare={share} title={title}>
       <LiveChyron
         phase={room.phase}
         onAir={onAir}
@@ -439,6 +560,8 @@ function ChautariRoomScreenActive() {
                       member={m}
                       isHost={isHost}
                       onAct={confirmAct}
+                      blocked={blocked.has(m.identity)}
+                      onSafety={openSafety}
                       localImageUrl={localImageUrl}
                       palette={palette}
                     />
@@ -460,6 +583,8 @@ function ChautariRoomScreenActive() {
             member={item.member}
             isHost={isHost}
             onAct={confirmAct}
+            blocked={blocked.has(item.member.identity)}
+            onSafety={openSafety}
             localImageUrl={localImageUrl}
             palette={palette}
           />
@@ -650,24 +775,29 @@ const SpeakerTile = React.memo(function SpeakerTile({
   member: p,
   isHost,
   onAct,
+  blocked,
+  onSafety,
   localImageUrl,
   palette,
 }: {
   member: RoomMember;
   isHost: boolean;
   onAct: (member: RoomMember, action: ModerationAction) => void;
+  /** The reader has blocked this person and is not hearing them. */
+  blocked: boolean;
+  onSafety: (member: RoomMember) => void;
   localImageUrl: string | null;
   palette: ThemePalette;
 }) {
-  const speaking = p.isSpeaking && !p.isMuted;
-  const label = stateLabel(p, speaking);
+  const speaking = p.isSpeaking && !p.isMuted && !blocked;
+  const label = blocked ? "Blocked" : stateLabel(p, speaking);
   const roleTint =
     speaking ? palette.red : p.isMuted ? palette.quiet : palette.ink2;
 
   return (
     <View
       style={styles.speakerTile}
-      accessible
+      accessible={p.isLocal}
       accessibilityLabel={`${p.name}${p.isLocal ? ", you" : ""}. ${label}.`}
     >
       <Avatar
@@ -686,20 +816,26 @@ const SpeakerTile = React.memo(function SpeakerTile({
         <Text style={[styles.speakerState, { color: roleTint }]}>{label}</Text>
       </View>
 
-      {isHost && !p.isLocal ? (
+      {/* No controls on your own tile; host controls only for the host. */}
+      {!p.isLocal ? (
         <View style={styles.speakerActions}>
-          <HostAction label="Mute" onPress={() => onAct(p, "mute")} palette={palette} />
-          <HostAction
-            label="Demote"
-            onPress={() => onAct(p, "demote_speaker")}
-            palette={palette}
-          />
-          <HostAction
-            label="Remove"
-            danger
-            onPress={() => onAct(p, "remove")}
-            palette={palette}
-          />
+          {isHost ? (
+            <>
+              <HostAction label="Mute" onPress={() => onAct(p, "mute")} palette={palette} />
+              <HostAction
+                label="Demote"
+                onPress={() => onAct(p, "demote_speaker")}
+                palette={palette}
+              />
+              <HostAction
+                label="Remove"
+                danger
+                onPress={() => onAct(p, "remove")}
+                palette={palette}
+              />
+            </>
+          ) : null}
+          <HostAction label="Report / Block" onPress={() => onSafety(p)} palette={palette} />
         </View>
       ) : null}
     </View>
@@ -712,12 +848,17 @@ const ListenerTile = React.memo(function ListenerTile({
   member: p,
   isHost,
   onAct,
+  blocked,
+  onSafety,
   localImageUrl,
   palette,
 }: {
   member: RoomMember;
   isHost: boolean;
   onAct: (member: RoomMember, action: ModerationAction) => void;
+  /** The reader has blocked this person and is not hearing them. */
+  blocked: boolean;
+  onSafety: (member: RoomMember) => void;
   localImageUrl: string | null;
   palette: ThemePalette;
 }) {
@@ -731,10 +872,13 @@ const ListenerTile = React.memo(function ListenerTile({
       <Text style={[styles.listenerName, { color: palette.ink2 }]} numberOfLines={1}>
         {p.isLocal ? "You" : firstName(p.name)}
       </Text>
+      {blocked ? (
+        <Text style={[styles.listenerName, { color: palette.quiet }]}>Blocked</Text>
+      ) : null}
     </View>
   );
 
-  if (!isHost || p.isLocal) {
+  if (p.isLocal) {
     return (
       <View
         accessible
@@ -745,21 +889,30 @@ const ListenerTile = React.memo(function ListenerTile({
     );
   }
 
+  /*
+   * Tap any other reader to report or block them (App Store guideline 1.2:
+   * every user must be able to). The host also gets their moderation
+   * actions here; long-press still works as before.
+   */
+  const openActions = () => {
+    if (!isHost) {
+      onSafety(p);
+      return;
+    }
+    Alert.alert(p.name, "Choose an action", [
+      { text: "Invite to stage", onPress: () => onAct(p, "approve_speaker") },
+      { text: "Remove", style: "destructive", onPress: () => onAct(p, "remove") },
+      { text: "Report or block", onPress: () => onSafety(p) },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
   return (
     <Pressable
-      onLongPress={() =>
-        Alert.alert(p.name, "Choose an action", [
-          { text: "Cancel", style: "cancel" },
-          { text: "Invite to stage", onPress: () => onAct(p, "approve_speaker") },
-          {
-            text: "Remove",
-            style: "destructive",
-            onPress: () => onAct(p, "remove"),
-          },
-        ])
-      }
+      onPress={openActions}
+      onLongPress={openActions}
       accessibilityRole="button"
-      accessibilityLabel={`${p.name}. Long-press for host actions.`}
+      accessibilityLabel={`${p.name}.${blocked ? " Blocked." : ""} ${isHost ? "Host actions, report or block." : "Report or block."}`}
     >
       {inner}
     </Pressable>

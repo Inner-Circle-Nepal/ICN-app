@@ -198,16 +198,8 @@ export type LanguagePreference = "en" | "ne";
 
 export interface HomeFeedData {
   lead: ArticleCard | null;
-  secondLead: ArticleCard[];
   alsoLeading: ArticleCard[];
-  latestGrid: ArticleCard[];
-  latestBriefs: ArticleCard[];
-  immigration: ArticleCard[];
-  trending: ArticleCard[];
-  investigationsCategory: Category | null;
-  investigationStories: ArticleCard[];
-  categories: Category[];
-  forexRates: ForexRate[];
-  nepseReading: NepseIndexReading;
+  /** The wire after the lead and its rail, newest first. */
+  latest: ArticleCard[];
   fetchedAt: string;
 }

@@ -20,7 +20,6 @@ import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { formatDateTime, timeAgo } from "@/utils/format";
 import { Avatar } from "@/components/chautari/Avatar";
 import { EmptyState } from "@/components/EmptyState";
-import { ErrorState } from "@/components/ErrorState";
 import { initialsFor } from "@/features/chautari/initials";
 
 /**
@@ -28,7 +27,7 @@ import { initialsFor } from "@/features/chautari/initials";
  *
  * The whole screen is composed like a wire-service bulletin board:
  *
- *   ┌─ ICN. Chautari                               ⟨you⟩ ┐  (masthead)
+ *   ┌─      CHAUTARI KO CHAYAMA SWAGAT CHA        ⟨you⟩ ┐  (masthead)
  *   │ ──────────────────────────────────────────────────  │
  *   │ ON AIR · N rooms live from the newsroom · HH:MM NPT │  (chyron)
  *   │                                                    │
@@ -80,11 +79,6 @@ export default function ChautariScreen() {
       params: { slug: room.slug, title: room.title, host: room.hostName ?? "" },
     });
 
-  const isEmpty =
-    !rooms.isLoading &&
-    !rooms.isError &&
-    (rooms.data?.length ?? 0) === 0;
-
   return (
     <View style={[styles.screen, { backgroundColor: palette.paper }]}>
       <Masthead palette={palette} />
@@ -126,14 +120,7 @@ export default function ChautariScreen() {
           />
         )}
         ListEmptyComponent={
-          <EmptyFallback
-            isEmpty={isEmpty}
-            isLoading={rooms.isLoading}
-            isError={rooms.isError}
-            onRetry={() => void rooms.refetch()}
-            onHome={() => router.navigate("/")}
-            palette={palette}
-          />
+          <EmptyFallback isLoading={rooms.isLoading} palette={palette} />
         }
       />
 
@@ -144,33 +131,14 @@ export default function ChautariScreen() {
 
 /* -------------------------------------------------------------------------- */
 
-/** The empty / loading / error state that sits between the schedule and nothing. */
-function EmptyFallback({
-  isEmpty,
-  isLoading,
-  isError,
-  onRetry,
-  onHome,
-  palette,
-}: {
-  isEmpty: boolean;
-  isLoading: boolean;
-  isError: boolean;
-  onRetry: () => void;
-  onHome: () => void;
-  palette: ThemePalette;
-}) {
-  if (isEmpty) {
-    return (
-      <EmptyState
-        kicker="Nothing on air"
-        title="No conversations right now"
-        description="Chautari rooms open around the news. When one starts, it will appear here."
-        actionLabel="Back to the front page"
-        onAction={onHome}
-      />
-    );
-  }
+/**
+ * What sits under the schedule when no one is on air: an invitation to host.
+ *
+ * A failed room list shows the same invitation rather than a connection
+ * error: to a reader, both mean "nothing is live", and pull-to-refresh
+ * still retries.
+ */
+function EmptyFallback({ isLoading, palette }: { isLoading: boolean; palette: ThemePalette }) {
   if (isLoading) {
     return (
       <View style={styles.loading}>
@@ -178,16 +146,36 @@ function EmptyFallback({
       </View>
     );
   }
-  if (isError) {
-    return (
-      <ErrorState
-        title="Could not load conversations"
-        message="Check your connection and try again."
-        onRetry={onRetry}
-      />
-    );
-  }
-  return null;
+  return isClerkConfigured ? <HostPromptSignedIn /> : <HostPrompt signedIn={false} />;
+}
+
+/** Mounted only when Clerk is configured, so `useAuth` is safe here. */
+function HostPromptSignedIn() {
+  const { isSignedIn } = useAuth();
+  return <HostPrompt signedIn={Boolean(isSignedIn)} />;
+}
+
+/**
+ * Signed-in readers already have "+ OPEN A ROOM" fixed at the foot of the
+ * screen, so the prompt points to it instead of adding a second button that
+ * does the same thing. Signed-out readers do not see that bar, so they get
+ * the sign-in button here.
+ */
+function HostPrompt({ signedIn }: { signedIn: boolean }) {
+  const router = useRouter();
+  return (
+    <EmptyState
+      kicker="Nothing on air"
+      title="Host a room in Chautari"
+      description={
+        signedIn
+          ? "No one is live right now. Tap Open a room below to start a conversation about the news."
+          : "No one is live right now. Sign in to start a conversation about the news."
+      }
+      actionLabel={signedIn ? undefined : "Sign in to host a room"}
+      onAction={signedIn ? undefined : () => router.push("/sign-in")}
+    />
+  );
 }
 
 function split(rooms: DiscoverRoom[]): { live: DiscoverRoom[]; scheduled: DiscoverRoom[] } {
@@ -219,28 +207,24 @@ function kathmanduClock(d: Date): string {
 /* ------------------------------------------------------------------ Masthead */
 
 /**
- * Top of every lobby view: paper wordmark + the signed-in reader's chip.
+ * Top of every lobby view: a welcome line + the signed-in reader's chip.
  *
  * Kept inline rather than reusing `AppHeader` because Direction B's masthead
  * is Chautari-specific — it carries the section name and the bar separators
  * that the general app header does not.
  */
 function Masthead({ palette }: { palette: ThemePalette }) {
-  const router = useRouter();
-
   return (
     <View style={[styles.masthead, { borderBottomColor: palette.rule }]}>
-      <Pressable
-        onPress={() => router.navigate("/")}
-        accessibilityRole="button"
-        accessibilityLabel="Back to Inner Circle Nepal front page"
-        style={styles.wordmark}
-        hitSlop={6}
+      <Text
+        style={[styles.welcome, { color: palette.ink }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.75}
+        accessibilityRole="header"
       >
-        <Text style={[styles.wordmarkIcn, { color: palette.ink }]}>ICN</Text>
-        <View style={[styles.wordmarkDot, { backgroundColor: palette.red }]} />
-        <Text style={[styles.wordmarkSection, { color: palette.ink }]}>Chautari</Text>
-      </Pressable>
+        CHAUTARI KO CHAYAMA SWAGAT CHA
+      </Text>
 
       <View style={styles.mastheadRight}>
         {/*
@@ -402,8 +386,8 @@ function formatScheduleStamp(scheduledFor: string | null): { day: string; time: 
 /**
  * Thin horizontal bar: who you are, and a link to the earn programme.
  *
- * Unsigned readers see a sign-in prompt instead; the earn link disappears
- * because it is only useful to someone who could host.
+ * Unsigned readers see a sign-in prompt in place of their name; the earn
+ * link stays, so anyone can read what hosting and earning require.
  */
 function SignedInBar({ palette }: { palette: ThemePalette }) {
   if (!isClerkConfigured) {
@@ -434,16 +418,18 @@ function SignedInBarActive({ palette }: { palette: ThemePalette }) {
       <View
         style={[styles.signedInBar, { borderTopColor: palette.rule, borderBottomColor: palette.rule }]}
       >
-        <Text style={[styles.signedInText, { color: palette.quiet }]} numberOfLines={1}>
-          Sign in to join a conversation.
-        </Text>
         <Pressable
           onPress={() => router.push("/sign-in")}
           accessibilityRole="button"
-          hitSlop={10}
+          accessibilityLabel="Sign in to join a conversation"
+          hitSlop={6}
+          style={styles.signedInIdentity}
         >
-          <Text style={[styles.signedInLink, { color: palette.ink }]}>SIGN IN →</Text>
+          <Text style={[styles.signedInText, { color: palette.quiet }]} numberOfLines={1}>
+            <Text style={[styles.signedInName, { color: palette.ink }]}>Sign in</Text> to join
+          </Text>
         </Pressable>
+        <EarnLink />
       </View>
     );
   }
@@ -465,15 +451,24 @@ function SignedInBarActive({ palette }: { palette: ThemePalette }) {
           <Text style={[styles.signedInName, { color: palette.ink }]}>{name}</Text>
         </Text>
       </Pressable>
-      <Pressable
-        onPress={() => router.push("/chautari/earn")}
-        accessibilityRole="button"
-        accessibilityLabel="Earn on Chautari — see the programme requirements"
-        hitSlop={10}
-      >
-        <Text style={[styles.signedInLink, { color: palette.ink }]}>EARN ON CHAUTARI →</Text>
-      </Pressable>
+      <EarnLink />
     </View>
+  );
+}
+
+/** The link to the earn programme, shown to every reader, signed in or not. */
+function EarnLink() {
+  const router = useRouter();
+  const { palette } = useTheme();
+  return (
+    <Pressable
+      onPress={() => router.push("/chautari/earn")}
+      accessibilityRole="button"
+      accessibilityLabel="Earn on Chautari — see the programme requirements"
+      hitSlop={10}
+    >
+      <Text style={[styles.signedInLink, { color: palette.ink }]}>EARN ON CHAUTARI →</Text>
+    </Pressable>
   );
 }
 
@@ -677,27 +672,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.gutter,
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    justifyContent: "flex-end",
     borderBottomWidth: 1,
   },
-  wordmark: { flexDirection: "row", alignItems: "baseline", gap: 10 },
-  wordmarkIcn: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 17,
-    letterSpacing: 1.4,
-  },
-  wordmarkDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginLeft: -8,
-    alignSelf: "flex-end",
-    marginBottom: 2,
-  },
-  wordmarkSection: {
+  /* Centred on the bar; the side insets leave room for the avatar on the right. */
+  welcome: {
+    position: "absolute",
+    left: spacing.gutter + 36,
+    right: spacing.gutter + 36,
+    textAlign: "center",
     fontFamily: fontFamilies.serifMedium,
-    fontSize: 17,
-    letterSpacing: -0.2,
+    fontSize: 13,
+    letterSpacing: 0.2,
   },
   mastheadRight: { flexDirection: "row", alignItems: "center", gap: 10 },
 

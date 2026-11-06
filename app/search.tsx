@@ -327,7 +327,7 @@ export default function SearchScreen() {
             <EmptyState
               kicker="0 matches"
               title="No matching dispatches found"
-              description="Try searching with a broader keyword, place name, or browse by section in Explore."
+              description="Try searching with a broader keyword, place name, or browse by section in Newsroom."
               actionLabel="Browse sections"
               onAction={() => router.push("/explore")}
             />

@@ -5,7 +5,8 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*', '.expo/*'],
+    // supabase/ holds Deno Edge Functions and SQL, deployed to Supabase, not bundled.
+    ignores: ['dist/*', '.expo/*', 'supabase/*'],
   },
   {
     /*
