@@ -376,6 +376,15 @@ export function useChautariRoom(
          * broadcast would fail exactly when someone's train went into a
          * tunnel.
          */
+        /*
+         * The phone's audio session does not depend on the grant, so it is
+         * started while the grant is requested rather than after it. If the
+         * grant is refused, teardown() stops the session again.
+         */
+        const audioReady = audioSession.start();
+        // Observed here so a failure while the grant loads is not reported as unhandled;
+        // it is still thrown by the `await audioReady` below.
+        audioReady.catch(() => undefined);
         const grant = await requestJoin(getTokenRef.current, {
           roomSlug: slug,
           displayName: displayNameRef.current,
@@ -388,9 +397,9 @@ export function useChautariRoom(
         if (grant.room) setIdentity(grant.room);
         setPhaseSafely("connecting");
 
-        // Must precede connect: the OS audio route is configured here, and
-        // on Android a missing session means no sound at all.
-        await audioSession.start();
+        // Must finish before connect: the OS audio route is configured here,
+        // and on Android a missing session means no sound at all.
+        await audioReady;
         if (mine !== generation.current) return;
 
         const room = new Room({

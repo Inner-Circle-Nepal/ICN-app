@@ -114,15 +114,38 @@ export async function discoverRooms(): Promise<DiscoverRoom[]> {
   return res.rooms ?? [];
 }
 
+/**
+ * Join grants handed over early, keyed by room slug.
+ *
+ * Opening a room already proves the caller is its host, so the server returns
+ * the host's join token in the same reply. Keeping it here lets the room
+ * screen connect straight away instead of asking /token again: one network
+ * round trip and several server-side database calls fewer before going live.
+ */
+const prefetchedJoins = new Map<string, { grant: JoinGrant; receivedAt: number }>();
+
+/** Take a prefetched grant if it is still fresh enough to use (single use). */
+function takePrefetchedJoin(slug: string): JoinGrant | null {
+  const hit = prefetchedJoins.get(slug);
+  if (!hit) return null;
+  prefetchedJoins.delete(slug);
+  // Leave a minute of margin so the token cannot expire mid-connect.
+  const ageSeconds = (Date.now() - hit.receivedAt) / 1000;
+  return ageSeconds < hit.grant.expiresInSeconds - 60 ? hit.grant : null;
+}
+
 export async function openRoom(
   getToken: GetToken,
   args: { title: string; description?: string; hostName?: string | null },
 ): Promise<{ slug: string; title: string }> {
-  const res = await call<{ room: { slug: string; title: string } }>(
+  const res = await call<{ room: { slug: string; title: string }; join?: JoinGrant | null }>(
     "/api/chautari/rooms",
     { method: "POST", body: JSON.stringify(args) },
     getToken,
   );
+  if (res.join?.token && res.join.url) {
+    prefetchedJoins.set(res.room.slug, { grant: res.join, receivedAt: Date.now() });
+  }
   return res.room;
 }
 
@@ -144,6 +167,8 @@ export async function requestJoin(
   getToken: GetToken,
   args: { roomSlug: string; displayName?: string | null },
 ): Promise<JoinGrant> {
+  const early = takePrefetchedJoin(args.roomSlug);
+  if (early) return early;
   return call<JoinGrant>(
     "/api/chautari/token",
     { method: "POST", body: JSON.stringify(args) },

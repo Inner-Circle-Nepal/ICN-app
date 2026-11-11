@@ -181,3 +181,46 @@ describe("request shapes", () => {
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
   });
 });
+
+describe("a host goes live without asking twice", () => {
+  const grant = {
+    token: "host_jwt",
+    url: "wss://rtc.icn.news",
+    identity: "user_host",
+    role: "host",
+    canPublish: true,
+    expiresInSeconds: 600,
+    room: { slug: "budget-abc12", title: "Budget", status: "live" },
+  };
+
+  it("uses the join grant returned when the room is opened", async () => {
+    fetchMock.mockResolvedValueOnce(
+      reply({ ok: true, room: { slug: "budget-abc12", title: "Budget" }, join: grant }, 201),
+    );
+    await openRoom(token, { title: "Budget" });
+    const joined = await requestJoin(token, { roomSlug: "budget-abc12" });
+    expect(joined.token).toBe("host_jwt");
+    // Only the open-room call went over the network.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses that grant once, then asks the server again (for reconnects)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply({ ok: true, room: { slug: "s1", title: "T" }, join: { ...grant, room: { ...grant.room, slug: "s1" } } }, 201))
+      .mockResolvedValueOnce(reply({ ok: true, ...grant, token: "fresh_jwt" }));
+    await openRoom(token, { title: "T" });
+    await requestJoin(token, { roomSlug: "s1" });
+    const again = await requestJoin(token, { roomSlug: "s1" });
+    expect(again.token).toBe("fresh_jwt");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("still works with a server that does not send a grant", async () => {
+    fetchMock
+      .mockResolvedValueOnce(reply({ ok: true, room: { slug: "s2", title: "T" } }, 201))
+      .mockResolvedValueOnce(reply({ ok: true, ...grant, token: "from_token_route" }));
+    await openRoom(token, { title: "T" });
+    const joined = await requestJoin(token, { roomSlug: "s2" });
+    expect(joined.token).toBe("from_token_route");
+  });
+});

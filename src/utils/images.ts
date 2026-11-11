@@ -75,3 +75,18 @@ export function sizedImageUrl(
   parsed.searchParams.set("quality", String(quality));
   return parsed.toString();
 }
+
+/**
+ * The small, low-quality copy used behind a Home feed card, where it is
+ * blurred beyond recognition. Width 400 at quality 40 is about a quarter of the
+ * hero's bytes, and far cheaper for the phone to decode and blur.
+ */
+export function feedBackdropUrl(url: string | null | undefined): string | undefined {
+  return sizedImageUrl(url, IMAGE_WIDTHS.thumb, 40);
+}
+
+/** Every image a Home feed card draws, for prefetching the next cards. */
+export function feedCardImageUrls(url: string | null | undefined): string[] {
+  const out = [sizedImageUrl(url, IMAGE_WIDTHS.hero), feedBackdropUrl(url)];
+  return out.filter((u): u is string => Boolean(u));
+}

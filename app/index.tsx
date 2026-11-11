@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
   RefreshControl,
@@ -6,6 +6,9 @@ import {
   View,
   type LayoutChangeEvent,
 } from "react-native";
+import { Image } from "expo-image";
+import { onHomeDoubleTap } from "@/features/home/homeTabEvents";
+import { feedCardImageUrls } from "@/utils/images";
 import {
   useHomeFeed,
   useInfiniteLatestArticles,
@@ -29,6 +32,9 @@ import { CachedNoticeBanner, ErrorState } from "@/components/ErrorState";
  */
 
 const WIRE_PAGE = 12;
+
+/** A card counts as "on screen" once most of it is showing. */
+const VIEWABILITY = { itemVisiblePercentThreshold: 60 };
 
 export default function HomeScreen() {
   const { palette } = useTheme();
@@ -72,6 +78,37 @@ export default function HomeScreen() {
     void refetch();
     void wire.refetch();
   }, [refetch, wire]);
+
+  /* Double-tap the Home tab: back to the top story, then refresh. */
+  const listRef = useRef<FlatList<ArticleCard>>(null);
+  useEffect(
+    () =>
+      onHomeDoubleTap(() => {
+        listRef.current?.scrollToOffset({ offset: 0, animated: true });
+        refresh();
+      }),
+    [refresh],
+  );
+
+  /*
+   * Fetch the next two stories' photos while the reader is on this one, so a
+   * swipe lands on a finished page instead of a blank frame. expo-image keeps
+   * them in its memory and disk cache, which FeedCard reads from.
+   */
+  const storiesRef = useRef(stories);
+  useEffect(() => {
+    storiesRef.current = stories;
+  }, [stories]);
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: { index?: number | null }[] }) => {
+      const index = viewableItems[0]?.index;
+      if (typeof index !== "number") return;
+      const next = storiesRef.current.slice(index + 1, index + 3);
+      const urls = next.flatMap((a) => feedCardImageUrls(a.hero_image));
+      if (urls.length) void Image.prefetch(urls, "memory-disk").catch(() => undefined);
+    },
+    [],
+  );
 
   const loadMore = useCallback(() => {
     if (wire.hasNextPage && !wire.isFetchingNextPage) void wire.fetchNextPage();
@@ -130,7 +167,10 @@ export default function HomeScreen() {
       <View style={styles.fill} onLayout={onLayout}>
         {pageHeight > 0 ? (
           <FlatList
+            ref={listRef}
             data={stories}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={VIEWABILITY}
             keyExtractor={(item) => item.slug}
             renderItem={renderItem}
             getItemLayout={getItemLayout}

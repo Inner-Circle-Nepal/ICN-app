@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { normaliseArticleRow } from "@/lib/api/queries";
-import { IMAGE_WIDTHS, sizedImageUrl } from "@/utils/images";
+import { IMAGE_WIDTHS, feedBackdropUrl, feedCardImageUrls, sizedImageUrl } from "@/utils/images";
 import { bookmarkToArticleCard, toBookmarkRecord } from "@/lib/storage/bookmarks";
 import { SUPABASE_URL } from "@/constants/config";
 import type { Article, ArticleCard } from "@/types/domain";
@@ -195,5 +195,32 @@ describe("bookmark record round-trip", () => {
     const article = normaliseArticleRow<Article>(baseRow({ author: null, body: "" }));
     const card = bookmarkToArticleCard(toBookmarkRecord(article));
     expect(card.author).toBeNull();
+  });
+});
+
+describe("feed card images", () => {
+  const host = SUPABASE_URL ? new URL(SUPABASE_URL).host : "example.supabase.co";
+  const stored = `https://${host}/storage/v1/object/public/media/2026/photo.jpg`;
+
+  it("blurs a small, low-quality copy behind the card", () => {
+    const url = feedBackdropUrl(stored) ?? "";
+    expect(url).toContain("/storage/v1/render/image/public/");
+    expect(url).toContain("width=400");
+    expect(url).toContain("quality=40");
+  });
+
+  it("prefetches both the photo and its backdrop", () => {
+    const urls = feedCardImageUrls(stored);
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toContain("width=1080");
+    expect(urls[1]).toContain("width=400");
+  });
+
+  it("leaves outside images alone and skips missing ones", () => {
+    expect(feedCardImageUrls("https://i.guim.co.uk/x.jpg")).toEqual([
+      "https://i.guim.co.uk/x.jpg",
+      "https://i.guim.co.uk/x.jpg",
+    ]);
+    expect(feedCardImageUrls(null)).toEqual([]);
   });
 });

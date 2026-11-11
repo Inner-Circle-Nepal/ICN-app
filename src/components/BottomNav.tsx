@@ -1,6 +1,7 @@
 import React from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { usePathname, useRouter } from "expo-router";
+import { registerHomeTabTap } from "@/features/home/homeTabEvents";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 import { useBookmarks } from "@/features/bookmarks/BookmarksContext";
@@ -163,7 +164,11 @@ export function BottomNav() {
           <Pressable
             key={tab.key}
             onPress={() => {
-              if (tab.active) return;
+              if (tab.active) {
+                // Double-tap Home while on Home: back to the top story, refreshed.
+                if (tab.href === "/") registerHomeTabTap();
+                return;
+              }
               /*
                * `navigate` either pushes the tab or unwinds to it if it is
                * already on the stack, so switching tabs repeatedly does not

@@ -9,7 +9,7 @@ import { useBookmarks } from "@/features/bookmarks/BookmarksContext";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
 import { canonicalArticleUrl, timeAgo } from "@/utils/format";
-import { IMAGE_WIDTHS, sizedImageUrl } from "@/utils/images";
+import { IMAGE_WIDTHS, feedBackdropUrl, sizedImageUrl } from "@/utils/images";
 
 /**
  * One story in the home feed: a full-screen vertical (9:16-style) page,
@@ -38,6 +38,13 @@ function FeedCardInner({ article, height }: FeedCardProps) {
 
   const hasImage = Boolean(article.hero_image) && !imageError;
   const uri = hasImage ? sizedImageUrl(article.hero_image, IMAGE_WIDTHS.hero) : undefined;
+  /*
+   * The page background is the same photo, heavily blurred. Blurring the
+   * full 1080px hero on the phone for every card was the most expensive thing
+   * on this screen, especially on Android; a small, low-quality copy looks the
+   * same once blurred and costs a fraction to download, decode and blur.
+   */
+  const backdropUri = hasImage ? feedBackdropUrl(article.hero_image) : undefined;
   const saved = isBookmarked(article.slug);
 
   const ne = language === "ne";
@@ -85,10 +92,10 @@ function FeedCardInner({ article, height }: FeedCardProps) {
       {uri ? (
         <>
           <Image
-            source={{ uri }}
+            source={{ uri: backdropUri }}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
-            blurRadius={40}
+            blurRadius={16}
             cachePolicy="memory-disk"
             recyclingKey={`${article.slug}:bg`}
             accessible={false}
