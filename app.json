@@ -55,7 +55,9 @@
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.INTERNET",
         "android.permission.WAKE_LOCK",
-        "android.permission.BLUETOOTH"
+        "android.permission.BLUETOOTH",
+        "android.permission.CAMERA",
+        "android.permission.SYSTEM_ALERT_WINDOW"
       ]
     },
     "web": {
@@ -117,8 +119,9 @@
         }
       },
       "eas": {
-        "projectId": "ee7a7c93-14f4-4193-b621-f77753a81222"
+        "projectId": "197925ea-fcc7-42a1-9a87-aaa71d5b007e"
       }
-    }
+    },
+    "owner": "innercirclenepal"
   }
 }
