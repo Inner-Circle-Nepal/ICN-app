@@ -595,9 +595,8 @@ function SectionHeader({
 /**
  * Sticky bottom bar with the "+ OPEN A ROOM" CTA.
  *
- * Only shown to signed-in readers (anyone else cannot host regardless). The
- * server does the entitlement check when the form submits — the button is
- * cheap optimism, and the plain refusal that follows is handled by the form.
+ * Only shown to signed-in readers, all of whom may host. The server still
+ * refuses an account the newsroom has barred; the form shows that refusal.
  */
 function OpenRoomDock({
   palette,

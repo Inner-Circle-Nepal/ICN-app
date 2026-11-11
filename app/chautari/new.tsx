@@ -30,9 +30,9 @@ const MAX_STANDFIRST = 500;
  * replacing the Clubhouse "title/description" wording. The POST payload is
  * unchanged — this is purely presentational.
  *
- * The server decides whether this account may host. Entitlement is checked
- * server-side when the form submits; a reader without one gets a plain refusal
- * rather than a disabled button they cannot explain.
+ * Any signed-in reader may host. The server still has the last word: an account
+ * the newsroom has barred gets a plain refusal when the form submits, rather
+ * than a disabled button they cannot explain.
  */
 /**
  * Outer guard: `useAuth`/`useUser` throw outside <ClerkProvider>, and the
@@ -240,8 +240,8 @@ function NewRoomScreenActive() {
         </Pressable>
 
         <Text style={[styles.legal, { color: palette.quiet }]}>
-          Hosting is granted by the newsroom. If your account is not yet approved you will be told
-          here, and nothing is charged.
+          Anyone signed in can host. Rooms are public: keep it respectful. Listeners can report or
+          block, and the newsroom can stop an account from hosting. Nothing is charged.
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
