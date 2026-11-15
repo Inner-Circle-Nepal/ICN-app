@@ -39,6 +39,8 @@ import { BookmarksProvider } from "@/features/bookmarks/BookmarksContext";
 import { BottomNav } from "@/components/BottomNav";
 import { MiniRoomBar } from "@/components/chautari/MiniRoomBar";
 import { ActiveRoomProvider } from "@/features/chautari/ActiveRoom";
+import { PushNudgeProvider } from "@/features/pushNudge/context";
+import { PushNudgeSheet } from "@/features/pushNudge/PushNudgeSheet";
 import { extractNotificationPath, syncPushRegistration } from "@/lib/notifications/push";
 import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
 
@@ -224,6 +226,7 @@ function AppShell() {
       </View>
       <MiniRoomBar />
       <BottomNav />
+      <PushNudgeSheet />
     </SafeAreaView>
   );
 }
@@ -255,7 +258,9 @@ export default function RootLayout() {
       <ThemeProvider>
         <BookmarksProvider>
           <ActiveRoomProvider>
-            <AppShell />
+            <PushNudgeProvider>
+              <AppShell />
+            </PushNudgeProvider>
           </ActiveRoomProvider>
         </BookmarksProvider>
       </ThemeProvider>

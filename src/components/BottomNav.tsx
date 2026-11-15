@@ -4,6 +4,7 @@ import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 import { useBookmarks } from "@/features/bookmarks/BookmarksContext";
+import { usePushNudge } from "@/features/pushNudge/context";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
 
@@ -24,6 +25,7 @@ export function BottomNav() {
   const insets = useSafeAreaInsets();
   const { palette } = useTheme();
   const { bookmarks } = useBookmarks();
+  const { showSettingsDot } = usePushNudge();
 
   /*
    * Optimistic active tab.
@@ -154,6 +156,7 @@ export function BottomNav() {
       label: "Settings",
       href: "/settings" as const,
       active: activeHref === "/settings",
+      showDot: showSettingsDot,
       icon: (color: string, active: boolean) => (
         <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
           <Path
@@ -219,6 +222,8 @@ export function BottomNav() {
                     {tab.badgeCount > 99 ? "99+" : tab.badgeCount}
                   </Text>
                 </View>
+              ) : tab.showDot ? (
+                <View style={[styles.dot, { backgroundColor: palette.red }]} />
               ) : null}
             </View>
             <Text style={[styles.tabLabel, { color }]}>{tab.label}</Text>
@@ -262,6 +267,14 @@ const styles = StyleSheet.create({
     fontFamily: fontFamilies.sansMedium,
     fontSize: 9,
     fontWeight: "500",
+  },
+  dot: {
+    position: "absolute",
+    top: -2,
+    right: -6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
   tabLabel: {
     fontFamily: fontFamilies.sansMedium,

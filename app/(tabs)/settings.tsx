@@ -1,5 +1,7 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Animated,
+  Easing,
   Linking,
   Pressable,
   ScrollView,
@@ -8,7 +10,10 @@ import {
   Text,
   TextInput,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
+import Svg, { Path } from "react-native-svg";
 import { Controller, useForm } from "react-hook-form";
 import { useRouter } from "expo-router";
 import { useAuth, useUser } from "@clerk/clerk-expo";
@@ -25,10 +30,17 @@ import {
   setStoredEdition,
 } from "@/lib/storage/preferences";
 import {
+  disableChautariPush,
   disablePushNotifications,
+  disableReminderPush,
+  enableChautariPush,
   enablePushNotifications,
+  enableReminderPush,
+  getChautariPushState,
   getPushNotificationState,
+  getReminderPushState,
 } from "@/lib/notifications/push";
+import { usePushNudge } from "@/features/pushNudge/context";
 import { queryClient } from "@/lib/query/queryClient";
 import { editions, site } from "@/constants/site";
 import { fontFamilies, spacing } from "@/theme/tokens";
@@ -169,9 +181,77 @@ export default function SettingsScreen() {
   const [notifStatusMessage, setNotifStatusMessage] = useState<string | null>(
     null,
   );
+  const [chautariEnabled, setChautariEnabled] = useState(false);
+  const [chautariStatusMessage, setChautariStatusMessage] = useState<
+    string | null
+  >(null);
+  const [reminderEnabled, setReminderEnabled] = useState(false);
+  const [reminderStatusMessage, setReminderStatusMessage] = useState<
+    string | null
+  >(null);
   const [cacheCleared, setCacheCleared] = useState(false);
   const [tipSubmitted, setTipSubmitted] = useState(false);
   const [tipError, setTipError] = useState<string | null>(null);
+  const { showSettingsDot, markNotificationsInteracted } = usePushNudge();
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const dispatchesYRef = useRef<number | null>(null);
+  const [sectionReached, setSectionReached] = useState(false);
+
+  // The pulsing "scroll to notifications" arrow lives in the bottom-right
+  // and is visible only when the dot is active AND the reader hasn't yet
+  // scrolled to (or tapped their way to) the notifications section.
+  const arrowVisible = showSettingsDot && !sectionReached;
+  const bounce = useMemo(() => new Animated.Value(0), []);
+
+  useEffect(() => {
+    if (!arrowVisible) return;
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(bounce, {
+          toValue: 1,
+          duration: 620,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(bounce, {
+          toValue: 0,
+          duration: 620,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [arrowVisible, bounce]);
+
+  const bounceY = bounce.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, 8],
+  });
+
+  // Either scrolling past the threshold OR tapping the arrow sets
+  // `sectionReached`. Once true, stays true for the rest of the mount so
+  // scrolling back up doesn't resurrect the arrow in the same session.
+  const handleScroll = (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    if (sectionReached) return;
+    const y = e.nativeEvent.contentOffset.y;
+    const sectionY = dispatchesYRef.current;
+    if (sectionY != null && y >= sectionY - 100) setSectionReached(true);
+  };
+
+  const handleTapArrow = () => {
+    const y = dispatchesYRef.current;
+    if (y != null) {
+      scrollRef.current?.scrollTo({ y: Math.max(0, y - 20), animated: true });
+    }
+    setSectionReached(true);
+    // Tapping the arrow is itself an acknowledgment: the reader has seen
+    // the nudge, chosen to act on it, and been taken to the notifications
+    // rows. Clear the tab-bar dot so it doesn't keep insisting for someone
+    // who has now decided one way or another.
+    markNotificationsInteracted();
+  };
 
   useEffect(() => {
     void getStoredEdition().then(setSelectedEdition);
@@ -181,6 +261,10 @@ export default function SettingsScreen() {
       if (state.statusNote) {
         setNotifStatusMessage(state.statusNote);
       }
+      const chautari = await getChautariPushState();
+      setChautariEnabled(chautari.enabled);
+      const reminder = await getReminderPushState();
+      setReminderEnabled(reminder.enabled);
     })();
   }, []);
 
@@ -191,6 +275,7 @@ export default function SettingsScreen() {
 
   const handleToggleNotifications = async (nextValue: boolean) => {
     setNotifStatusMessage(null);
+    markNotificationsInteracted();
     if (nextValue) {
       const res = await enablePushNotifications();
       setNotificationsEnabled(res.enabled);
@@ -206,7 +291,49 @@ export default function SettingsScreen() {
     } else {
       await disablePushNotifications();
       setNotificationsEnabled(false);
+      // Turning push off also pauses Chautari and reminder alerts (the
+      // token row is gone, so the server-side preference has nowhere to
+      // live). Keep the local preferences as-is so flipping push back on
+      // restores them.
+      setChautariEnabled(false);
+      setReminderEnabled(false);
       setNotifStatusMessage("Breaking-news alerts paused.");
+    }
+  };
+
+  const handleToggleChautari = async (nextValue: boolean) => {
+    setChautariStatusMessage(null);
+    markNotificationsInteracted();
+    if (nextValue) {
+      const res = await enableChautariPush();
+      setChautariEnabled(res.enabled);
+      setChautariStatusMessage(
+        res.enabled
+          ? "Chautari alerts enabled."
+          : "Could not enable Chautari alerts.",
+      );
+    } else {
+      await disableChautariPush();
+      setChautariEnabled(false);
+      setChautariStatusMessage("Chautari alerts paused.");
+    }
+  };
+
+  const handleToggleReminders = async (nextValue: boolean) => {
+    setReminderStatusMessage(null);
+    markNotificationsInteracted();
+    if (nextValue) {
+      const res = await enableReminderPush();
+      setReminderEnabled(res.enabled);
+      setReminderStatusMessage(
+        res.enabled
+          ? "Reminders enabled. A nudge arrives Tuesday, Thursday, and Saturday."
+          : "Could not enable reminders.",
+      );
+    } else {
+      await disableReminderPush();
+      setReminderEnabled(false);
+      setReminderStatusMessage("Reminders paused.");
     }
   };
 
@@ -290,8 +417,11 @@ export default function SettingsScreen() {
       />
 
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
+        onScroll={handleScroll}
+        scrollEventThrottle={80}
       >
         {/* Header */}
         <View
@@ -488,7 +618,12 @@ export default function SettingsScreen() {
         </View>
 
         {/* 2. Dispatches & Alerts */}
-        <View style={styles.section}>
+        <View
+          style={styles.section}
+          onLayout={(e) => {
+            dispatchesYRef.current = e.nativeEvent.layout.y;
+          }}
+        >
           <SectionRule title="Dispatches & alerts" />
 
           <View
@@ -498,6 +633,11 @@ export default function SettingsScreen() {
             ]}
           >
             <View style={styles.switchTextCol}>
+              {!notificationsEnabled ? (
+                <Text style={[styles.hintKicker, { color: palette.red }]}>
+                  Enable · नयाँ
+                </Text>
+              ) : null}
               <Text style={[styles.settingTitle, { color: palette.ink }]}>
                 Breaking News Push Alerts
               </Text>
@@ -516,6 +656,66 @@ export default function SettingsScreen() {
             <Switch
               value={notificationsEnabled}
               onValueChange={(val) => void handleToggleNotifications(val)}
+              trackColor={{ false: palette.rule2, true: palette.ink }}
+              thumbColor={palette.paper}
+            />
+          </View>
+
+          <View
+            style={[
+              styles.switchRow,
+              { borderBottomColor: palette.rule },
+              !notificationsEnabled && styles.switchRowMuted,
+            ]}
+          >
+            <View style={styles.switchTextCol}>
+              <Text style={[styles.settingTitle, { color: palette.ink }]}>
+                Chautari — Live Room Alerts
+              </Text>
+              <Text style={[styles.settingDesc, { color: palette.quiet }]}>
+                Ping me whenever a new Chautari live audio room opens. Requires
+                push notifications above to be on.
+              </Text>
+              {chautariStatusMessage ? (
+                <Text style={[styles.notifFeedback, { color: palette.ink2 }]}>
+                  {chautariStatusMessage}
+                </Text>
+              ) : null}
+            </View>
+            <Switch
+              value={chautariEnabled}
+              onValueChange={(val) => void handleToggleChautari(val)}
+              disabled={!notificationsEnabled}
+              trackColor={{ false: palette.rule2, true: palette.ink }}
+              thumbColor={palette.paper}
+            />
+          </View>
+
+          <View
+            style={[
+              styles.switchRow,
+              { borderBottomColor: palette.rule },
+              !notificationsEnabled && styles.switchRowMuted,
+            ]}
+          >
+            <View style={styles.switchTextCol}>
+              <Text style={[styles.settingTitle, { color: palette.ink }]}>
+                Weekly Reminders
+              </Text>
+              <Text style={[styles.settingDesc, { color: palette.quiet }]}>
+                A light nudge on Tuesday, Thursday, and Saturday morning.
+                Requires push notifications above to be on.
+              </Text>
+              {reminderStatusMessage ? (
+                <Text style={[styles.notifFeedback, { color: palette.ink2 }]}>
+                  {reminderStatusMessage}
+                </Text>
+              ) : null}
+            </View>
+            <Switch
+              value={reminderEnabled}
+              onValueChange={(val) => void handleToggleReminders(val)}
+              disabled={!notificationsEnabled}
               trackColor={{ false: palette.rule2, true: palette.ink }}
               thumbColor={palette.paper}
             />
@@ -814,6 +1014,33 @@ export default function SettingsScreen() {
           </View>
         </View>
       </ScrollView>
+
+      {arrowVisible ? (
+        <Animated.View
+          style={[styles.scrollHint, { transform: [{ translateY: bounceY }] }]}
+        >
+          <Pressable
+            onPress={handleTapArrow}
+            accessibilityRole="button"
+            accessibilityLabel="Scroll to notifications"
+            hitSlop={10}
+            style={[
+              styles.scrollHintBtn,
+              { backgroundColor: palette.red, borderColor: palette.red },
+            ]}
+          >
+            <Svg width={26} height={26} viewBox="0 0 24 24" fill="none">
+              <Path
+                d="M5 7 L12 13 L19 7 M5 13 L12 19 L19 13"
+                stroke={palette.paper}
+                strokeWidth={2.4}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          </Pressable>
+        </Animated.View>
+      ) : null}
     </View>
   );
 }
@@ -934,6 +1161,16 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     gap: 14,
   },
+  switchRowMuted: {
+    opacity: 0.55,
+  },
+  hintKicker: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 10.5,
+    letterSpacing: 1.3,
+    textTransform: "uppercase",
+    marginBottom: 4,
+  },
   switchTextCol: {
     flex: 1,
   },
@@ -1048,5 +1285,23 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 1.2,
     textTransform: "uppercase",
+  },
+  scrollHint: {
+    position: "absolute",
+    right: 20,
+    bottom: 20,
+  },
+  scrollHintBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    shadowColor: "#000",
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
   },
 });

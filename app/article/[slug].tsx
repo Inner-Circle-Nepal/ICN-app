@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
   BackHandler,
@@ -14,6 +14,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import Svg, { Path } from "react-native-svg";
 
 import { useArticleDetail } from "@/features/articles/useArticles";
+import { usePushNudge } from "@/features/pushNudge/context";
 import { useNarration } from "@/features/audio/useNarration";
 import { narrationTextFromHtml } from "@/utils/narration";
 import { ListenBar } from "@/components/ListenBar";
@@ -52,6 +53,11 @@ export default function ArticleDetailScreen() {
   const params = useLocalSearchParams<{ slug?: string | string[] }>();
   const rawSlug = Array.isArray(params.slug) ? params.slug[0] : params.slug;
   const slug = rawSlug ? decodeURIComponent(rawSlug) : "";
+
+  const { recordArticleOpen } = usePushNudge();
+  useEffect(() => {
+    if (slug) recordArticleOpen();
+  }, [slug, recordArticleOpen]);
 
   const { palette, language, setLanguage } = useTheme();
   const {

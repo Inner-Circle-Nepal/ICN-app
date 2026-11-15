@@ -29,6 +29,7 @@ import {
   type RoomMember,
 } from "@/features/chautari/useChautariRoom";
 import { useActiveRoom } from "@/features/chautari/ActiveRoom";
+import { usePushNudge } from "@/features/pushNudge/context";
 import { submitContactMessage } from "@/lib/api/newsletter";
 import { getBlockedIdentities, setBlockedIdentities } from "@/lib/storage/chautariBlocks";
 import { isClerkConfigured } from "@/constants/config";
@@ -145,6 +146,11 @@ function ChautariRoomScreenActive() {
   const slug = raw ? decodeURIComponent(raw) : "";
   const hintedTitle = typeof params.title === "string" ? params.title : null;
   const hintedHost = typeof params.host === "string" && params.host ? params.host : null;
+
+  const { recordChautariOpen } = usePushNudge();
+  useEffect(() => {
+    if (slug) recordChautariOpen();
+  }, [slug, recordChautariOpen]);
 
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
