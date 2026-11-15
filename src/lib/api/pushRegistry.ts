@@ -43,3 +43,52 @@ export async function unregisterPushToken(token: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Flip the Chautari-live opt-in for a token already in `mobile_push_tokens`.
+ *
+ * Does not create the row — the phone must already be registered via
+ * `registerPushToken` (i.e. the breaking-news toggle is on). If no row
+ * exists, the update affects zero rows and the function is a quiet no-op,
+ * which is intentional: the Settings UI prevents enabling Chautari when
+ * push is off, so hitting this path would be a client-side bug and not
+ * something the server should fail loudly over.
+ */
+export async function setChautariPushPreference(
+  token: string,
+  enabled: boolean,
+): Promise<boolean> {
+  const sb = getPublicSupabase();
+  if (!sb || (Platform.OS !== "ios" && Platform.OS !== "android")) return false;
+  try {
+    const { error } = await sb.rpc("set_chautari_push_preference", {
+      p_token: token,
+      p_enabled: enabled,
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Flip the reminder opt-in. Same shape as `setChautariPushPreference`:
+ * a no-op update when the row is missing, because the Settings UI
+ * requires push to be on before the reminder switch is reachable.
+ */
+export async function setReminderPushPreference(
+  token: string,
+  enabled: boolean,
+): Promise<boolean> {
+  const sb = getPublicSupabase();
+  if (!sb || (Platform.OS !== "ios" && Platform.OS !== "android")) return false;
+  try {
+    const { error } = await sb.rpc("set_reminder_push_preference", {
+      p_token: token,
+      p_enabled: enabled,
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}

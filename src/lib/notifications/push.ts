@@ -1,11 +1,4 @@
 import { Platform } from "react-native";
-/*
- * Types only — `import type` is erased by TypeScript, so this cannot pull
- * expo-notifications into the runtime graph. The module itself is resolved
- * through the guarded accessor below, because importing it directly throws
- * in Expo Go. See ./module.ts.
- */
-import type * as NotificationsNS from "expo-notifications";
 import { notificationsModule } from "./module";
 import * as Device from "expo-device";
 import Constants from "expo-constants";
@@ -15,11 +8,20 @@ import {
   setSecurePushToken,
 } from "@/lib/storage/secureTokens";
 import {
+  getStoredChautariNotificationsPref,
   getStoredNotificationsPref,
+  getStoredReminderNotificationsPref,
+  setStoredChautariNotificationsPref,
   setStoredNotificationsPref,
+  setStoredReminderNotificationsPref,
 } from "@/lib/storage/preferences";
 import { brandColors } from "@/theme/tokens";
-import { registerPushToken, unregisterPushToken } from "@/lib/api/pushRegistry";
+import {
+  registerPushToken,
+  setChautariPushPreference,
+  setReminderPushPreference,
+  unregisterPushToken,
+} from "@/lib/api/pushRegistry";
 
 /**
  * Breaking-news notification infrastructure for Inner Circle Nepal Mobile.
@@ -139,6 +141,20 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
       lightColor: brandColors.icn700,
       vibrationPattern: [0, 200, 120, 200],
     });
+    await N.setNotificationChannelAsync("chautari-live", {
+      name: "Chautari — live rooms",
+      description: "Alerts when a Chautari live audio room opens",
+      importance: N.AndroidImportance.DEFAULT,
+      lightColor: brandColors.icn700,
+      vibrationPattern: [0, 150, 100, 150],
+    });
+    await N.setNotificationChannelAsync("reminders", {
+      name: "Reminders",
+      description: "Occasional nudges to come back to the newsroom",
+      importance: N.AndroidImportance.LOW,
+      lightColor: brandColors.icn700,
+      vibrationPattern: [0, 100],
+    });
   }
 
   const current = await N.getPermissionsAsync();
@@ -179,6 +195,15 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
         statusNote =
           "Alerts are on. We could not reach the newsroom just now; this phone will be registered the next time the app opens.";
       }
+      // Replay the Chautari preference: if the reader had it on previously,
+      // turned push off, and is now turning push back on, carry the opt-in
+      // across. The row was just re-created with the default (false).
+      if (await getStoredChautariNotificationsPref()) {
+        await setChautariPushPreference(token, true);
+      }
+      if (await getStoredReminderNotificationsPref()) {
+        await setReminderPushPreference(token, true);
+      }
     } catch {
       statusNote =
         "Notification permission granted, but this phone could not get a push address. Please try again later.";
@@ -214,6 +239,80 @@ export async function disablePushNotifications(): Promise<PushNotificationState>
 }
 
 /**
+ * Chautari-live push preference. Independent of the breaking-news toggle,
+ * but requires push to be enabled at all (the row in `mobile_push_tokens`
+ * must exist for the preference flip to have anywhere to land).
+ */
+
+export type ChautariPushState = {
+  enabled: boolean;
+  /** True iff the breaking-news toggle is on; Chautari requires it. */
+  pushAvailable: boolean;
+};
+
+export async function getChautariPushState(): Promise<ChautariPushState> {
+  const [pushEnabled, chautariEnabled] = await Promise.all([
+    getStoredNotificationsPref(),
+    getStoredChautariNotificationsPref(),
+  ]);
+  return {
+    enabled: pushEnabled && chautariEnabled,
+    pushAvailable: pushEnabled,
+  };
+}
+
+export async function enableChautariPush(): Promise<ChautariPushState> {
+  const token = await getSecurePushToken();
+  await setStoredChautariNotificationsPref(true);
+  if (token) await setChautariPushPreference(token, true);
+  return getChautariPushState();
+}
+
+export async function disableChautariPush(): Promise<ChautariPushState> {
+  const token = await getSecurePushToken();
+  await setStoredChautariNotificationsPref(false);
+  if (token) await setChautariPushPreference(token, false);
+  return getChautariPushState();
+}
+
+/**
+ * Reminder push preference. Same shape as [[ChautariPushState]] — a
+ * separate opt-in, but requires the token row (i.e. breaking-news push)
+ * to exist. Sent three times a week by a pg_cron-scheduled Edge Function.
+ */
+
+export type ReminderPushState = {
+  enabled: boolean;
+  /** True iff the breaking-news toggle is on; reminders require it. */
+  pushAvailable: boolean;
+};
+
+export async function getReminderPushState(): Promise<ReminderPushState> {
+  const [pushEnabled, reminderEnabled] = await Promise.all([
+    getStoredNotificationsPref(),
+    getStoredReminderNotificationsPref(),
+  ]);
+  return {
+    enabled: pushEnabled && reminderEnabled,
+    pushAvailable: pushEnabled,
+  };
+}
+
+export async function enableReminderPush(): Promise<ReminderPushState> {
+  const token = await getSecurePushToken();
+  await setStoredReminderNotificationsPref(true);
+  if (token) await setReminderPushPreference(token, true);
+  return getReminderPushState();
+}
+
+export async function disableReminderPush(): Promise<ReminderPushState> {
+  const token = await getSecurePushToken();
+  await setStoredReminderNotificationsPref(false);
+  if (token) await setReminderPushPreference(token, false);
+  return getReminderPushState();
+}
+
+/**
  * Re-register on launch for a reader who has alerts on.
  *
  * Expo tokens can change (reinstall, restore to a new phone), an opt-in made
@@ -243,31 +342,19 @@ export async function syncPushRegistration(): Promise<void> {
     if (previous && previous !== current) await unregisterPushToken(previous);
     if (current !== previous) await setSecurePushToken(current);
     await registerPushToken(current);
+    // Replay the Chautari preference: `register_push_token` upserts the row
+    // but defaults `chautari_enabled` to false, so a reader who opted in
+    // on an earlier launch would otherwise have the preference silently
+    // dropped every time the token is refreshed. Same for reminders.
+    if (await getStoredChautariNotificationsPref()) {
+      await setChautariPushPreference(current, true);
+    }
+    if (await getStoredReminderNotificationsPref()) {
+      await setReminderPushPreference(current, true);
+    }
   } catch {
     // Next launch tries again.
   }
 }
 
-/**
- * Extracts a target path or slug from a notification payload when tapped.
- * Mirrors `PushPayload` in `site/src/lib/push/server.ts` (`{ path, title, body, tag }`).
- */
-export function extractNotificationPath(
-  response: NotificationsNS.NotificationResponse | null,
-): string | null {
-  const data = response?.notification?.request?.content?.data as
-    | Record<string, unknown>
-    | undefined;
-  if (!data) return null;
-
-  if (typeof data.path === "string" && data.path.trim()) {
-    return data.path.trim();
-  }
-  if (typeof data.slug === "string" && data.slug.trim()) {
-    return `/article/${data.slug.trim()}`;
-  }
-  if (typeof data.url === "string" && data.url.trim()) {
-    return data.url.trim();
-  }
-  return null;
-}
+export { extractNotificationPath } from "./path";

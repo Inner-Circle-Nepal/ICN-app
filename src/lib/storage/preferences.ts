@@ -14,6 +14,13 @@ const KEYS = {
   edition: "icn-edition",
   recentSearches: "icn-recent-searches",
   notificationsEnabled: "icn-notifications-enabled",
+  chautariNotificationsEnabled: "icn-chautari-notifications-enabled",
+  reminderNotificationsEnabled: "icn-reminder-notifications-enabled",
+  nudgeArticleCount: "icn-nudge-article-count",
+  nudgeSettingsSeen: "icn-nudge-settings-seen",
+  nudgeLastShownAt: "icn-nudge-last-shown-at",
+  nudgeDeclineCount: "icn-nudge-decline-count",
+  nudgeSilenced: "icn-nudge-silenced",
 } as const;
 
 export async function getStoredTheme(): Promise<ThemePreference> {
@@ -122,6 +129,46 @@ export async function getStoredNotificationsPref(): Promise<boolean> {
 export async function setStoredNotificationsPref(enabled: boolean): Promise<void> {
   try {
     await AsyncStorage.setItem(KEYS.notificationsEnabled, enabled ? "true" : "false");
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export async function getStoredChautariNotificationsPref(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.chautariNotificationsEnabled);
+    return raw === "true";
+  } catch {
+    return false;
+  }
+}
+
+export async function setStoredChautariNotificationsPref(enabled: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      KEYS.chautariNotificationsEnabled,
+      enabled ? "true" : "false",
+    );
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export async function getStoredReminderNotificationsPref(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.reminderNotificationsEnabled);
+    return raw === "true";
+  } catch {
+    return false;
+  }
+}
+
+export async function setStoredReminderNotificationsPref(enabled: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      KEYS.reminderNotificationsEnabled,
+      enabled ? "true" : "false",
+    );
   } catch {
     // Ignore storage errors
   }
