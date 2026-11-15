@@ -25,6 +25,7 @@
     },
     "android": {
       "package": "news.icn.mobile",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#fbfaf7",
         "foregroundImage": "./assets/android-icon-foreground.png",
