@@ -9,6 +9,9 @@ dist/
 web-build/
 expo-env.d.ts
 
+# Local `eas build --local` output — large APKs that belong on a device, not in git.
+build-*.apk
+
 # Native
 .kotlin/
 *.orig.*
@@ -32,6 +35,10 @@ expo-env.d.ts
 
 # Metro
 .metro-health-check*
+
+# Supabase CLI local state — linked-project.json, service versions, pooler URL.
+# Reproducible from `supabase link`, not source.
+supabase/.temp/
 
 # debug
 npm-debug.*
