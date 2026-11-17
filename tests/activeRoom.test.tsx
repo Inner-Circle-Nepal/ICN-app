@@ -26,6 +26,15 @@ vi.mock("@clerk/clerk-expo", () => ({
   useAuth: () => ({ isSignedIn: true, getToken: async () => "t" }),
   useUser: () => ({ user: { fullName: "Asha" } }),
 }));
+vi.mock("@/features/profile/useMyProfile", () => ({
+  useMyProfile: () => ({
+    profile: { display_name: "Asha" },
+    isLoading: false,
+    isSignedIn: true,
+    needsCompletion: false,
+    refetch: () => Promise.resolve(),
+  }),
+}));
 vi.mock("@/constants/config", () => ({ isClerkConfigured: true }));
 vi.mock("@/lib/livekit/platform", () => ({ isLiveKitAvailable: () => true }));
 

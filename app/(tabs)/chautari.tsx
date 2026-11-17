@@ -17,10 +17,10 @@ import { discoverRooms, type DiscoverRoom } from "@/lib/api/chautari";
 import { isClerkConfigured } from "@/constants/config";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
-import { formatDateTime, timeAgo } from "@/utils/format";
 import { Avatar } from "@/components/chautari/Avatar";
+import { LiveRoomCard, UpcomingRail } from "@/components/chautari/LobbyCards";
 import { EmptyState } from "@/components/EmptyState";
-import { initialsFor } from "@/features/chautari/initials";
+import { useMyProfile } from "@/features/profile/useMyProfile";
 
 /**
  * Chautari lobby — Direction B ("The dispatch").
@@ -30,22 +30,18 @@ import { initialsFor } from "@/features/chautari/initials";
  *   ┌─      CHAUTARI KO CHAYAMA SWAGAT CHA        ⟨you⟩ ┐  (masthead)
  *   │ ──────────────────────────────────────────────────  │
  *   │ ON AIR · N rooms live from the newsroom · HH:MM NPT │  (chyron)
- *   │                                                    │
- *   │ COMING UP ON THE SCHEDULE                   N rooms│
- *   │   FRI 7:30 PM   The diaspora vote...               │
- *   │   SUN 6:00 PM   लोकसेवा टिकेट्र्क...                 │
- *   │                                                    │
  *   │ Signed in as X             EARN ON CHAUTARI →      │
  *   │                                                    │
- *   │ ● LIVE · On air 24:16                              │
- *   │   Who pays for the new federal budget?             │
- *   │   ⟨RS⟩ Rina Shrestha  HOST                         │
- *   │   47 listening · 4 on stage                        │
- *   │   RE: Finance minister tables…                     │
+ *   │ ON AIR NOW                                  N live │
+ *   │ ┌[ cover photo · LIVE 24 min ]──────────────────┐  │
+ *   │ │ Who pays for the new federal budget?          │  │
+ *   │ │ ⟨RS⟩ Rina Shrestha · 51 in the room  LISTEN IN│  │
+ *   │ └───────────────────────────────────────────────┘  │
  *   │                                                    │
- *   │ ... more live rooms                                │
+ *   │ COMING UP                         N on the schedule│
+ *   │ [cover SAT 7:30][cover SUN 6:00][...  → scrolls    │
  *   └────────────────────────────────────────────────────┘
- *   [          + OPEN A ROOM          ]  (fixed, when hostable)
+ *   [ YOUR ROOMS ][      + OPEN A ROOM      ]  (signed in)
  *
  * Browsing needs no account. Joining does — that gate lives on the room
  * screen and on the server, not here, because requiring a sign-in to see
@@ -115,7 +111,6 @@ export default function ChautariScreen() {
         }
         ListHeaderComponent={
           <View>
-            <ScheduledSection rooms={scheduled} onPress={openRoom} palette={palette} />
             <SignedInBar palette={palette} />
             {live.length > 0 ? (
               <SectionHeader
@@ -126,17 +121,11 @@ export default function ChautariScreen() {
             ) : null}
           </View>
         }
-        renderItem={({ item, index }) => (
-          <LiveRoomCard
-            room={item}
-            onPress={() => openRoom(item)}
-            showRule={index > 0}
-            palette={palette}
-          />
-        )}
+        renderItem={({ item }) => <LiveRoomCard room={item} onPress={() => openRoom(item)} />}
         ListEmptyComponent={
           <EmptyFallback isLoading={rooms.isLoading} palette={palette} />
         }
+        ListFooterComponent={<UpcomingRail rooms={scheduled} onPress={openRoom} />}
       />
 
       <OpenRoomDock palette={palette} insetsBottom={insets.bottom} />
@@ -259,6 +248,7 @@ function MastheadIdentity() {
   const router = useRouter();
   const { isSignedIn } = useAuth();
   const { user } = useUser();
+  const { profile } = useMyProfile();
   if (!isSignedIn || !user) return null;
   return (
     <Pressable
@@ -268,9 +258,9 @@ function MastheadIdentity() {
       hitSlop={8}
     >
       <Avatar
-        name={user.fullName?.trim() || user.firstName?.trim() || "You"}
+        name={profile?.display_name ?? "You"}
         size="sm"
-        imageUrl={user.hasImage ? user.imageUrl : null}
+        imageUrl={profile?.avatar_url ?? (user.hasImage ? user.imageUrl : null)}
       />
     </Pressable>
   );
@@ -301,99 +291,6 @@ function OnAirChyron({
       </Text>
     </View>
   );
-}
-
-/* ----------------------------------------------------------------- Schedule */
-
-function ScheduledSection({
-  rooms,
-  onPress,
-  palette,
-}: {
-  rooms: DiscoverRoom[];
-  onPress: (room: DiscoverRoom) => void;
-  palette: ThemePalette;
-}) {
-  if (rooms.length === 0) return null;
-
-  return (
-    <View style={{ marginTop: 20 }}>
-      <SectionHeader
-        left="Coming up on the schedule"
-        right={`${rooms.length} room${rooms.length === 1 ? "" : "s"}`}
-        palette={palette}
-      />
-      {rooms.map((room, i) => (
-        <ScheduledRow
-          key={room.slug}
-          room={room}
-          onPress={() => onPress(room)}
-          showRule={i > 0}
-          palette={palette}
-        />
-      ))}
-    </View>
-  );
-}
-
-function ScheduledRow({
-  room,
-  onPress,
-  showRule,
-  palette,
-}: {
-  room: DiscoverRoom;
-  onPress: () => void;
-  showRule: boolean;
-  palette: ThemePalette;
-}) {
-  const { day, time } = useMemo(() => formatScheduleStamp(room.scheduledFor), [room.scheduledFor]);
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={`Scheduled: ${room.title}. ${day} at ${time}.${room.hostName ? ` Hosted by ${room.hostName}.` : ""}`}
-      style={({ pressed }) => [
-        styles.schedRow,
-        showRule && { borderTopWidth: 1, borderTopColor: palette.rule },
-        pressed && styles.pressed,
-      ]}
-    >
-      <View style={styles.schedStamp}>
-        <Text style={[styles.schedDay, { color: palette.quiet }]}>{day}</Text>
-        <Text style={[styles.schedTime, { color: palette.ink }]}>{time}</Text>
-      </View>
-      <View style={styles.schedBody}>
-        <Text style={[styles.schedTitle, { color: palette.ink }]} numberOfLines={2}>
-          {room.title}
-        </Text>
-        {room.hostName ? (
-          <Text style={[styles.schedMeta, { color: palette.quiet }]} numberOfLines={1}>
-            {room.hostName}
-          </Text>
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
-
-/** "FRI" and "7:30 PM" split so the stamp can stack. All times in NPT. */
-function formatScheduleStamp(scheduledFor: string | null): { day: string; time: string } {
-  if (!scheduledFor) return { day: "TBD", time: "" };
-  const dt = new Date(scheduledFor);
-  const day = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Kathmandu",
-    weekday: "short",
-  })
-    .format(dt)
-    .toUpperCase();
-  const time = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Kathmandu",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(dt);
-  return { day, time: `${time} NPT` };
 }
 
 /* ------------------------------------------------------------- Signed-in bar */
@@ -427,6 +324,7 @@ function SignedInBarActive({ palette }: { palette: ThemePalette }) {
   const router = useRouter();
   const { isSignedIn } = useAuth();
   const { user } = useUser();
+  const { profile } = useMyProfile();
 
   if (!isSignedIn) {
     return (
@@ -449,7 +347,7 @@ function SignedInBarActive({ palette }: { palette: ThemePalette }) {
     );
   }
 
-  const name = user?.firstName?.trim() || user?.primaryEmailAddress?.emailAddress || "you";
+  const name = profile?.display_name || user?.primaryEmailAddress?.emailAddress || "you";
   return (
     <View
       style={[styles.signedInBar, { borderTopColor: palette.rule, borderBottomColor: palette.rule }]}
@@ -485,103 +383,6 @@ function EarnLink() {
       <Text style={[styles.signedInLink, { color: palette.ink }]}>EARN ON CHAUTARI →</Text>
     </Pressable>
   );
-}
-
-/* -------------------------------------------------------------- Live room cards */
-
-function LiveRoomCard({
-  room,
-  onPress,
-  showRule,
-  palette,
-}: {
-  room: DiscoverRoom;
-  onPress: () => void;
-  showRule: boolean;
-  palette: ThemePalette;
-}) {
-  const onAir = room.startedAt ? elapsedSince(room.startedAt) : null;
-
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={accessibilityLabel(room)}
-      style={({ pressed }) => [
-        styles.card,
-        showRule && { borderTopWidth: 1, borderTopColor: palette.rule, paddingTop: 20 },
-        pressed && styles.pressed,
-      ]}
-    >
-      {/* Live kicker row: red dot + LIVE + duration + FULL chip */}
-      <View style={styles.cardKicker}>
-        <View style={[styles.liveDot, { backgroundColor: palette.red }]} />
-        <Text style={[styles.liveLabel, { color: palette.red }]}>LIVE</Text>
-        {onAir ? (
-          <Text style={[styles.cardMeta, { color: palette.quiet }]}>· On air {onAir}</Text>
-        ) : null}
-        {room.isFull ? (
-          <View style={[styles.fullChip, { borderColor: palette.rule2 }]}>
-            <Text style={[styles.fullChipText, { color: palette.ink2 }]}>Full</Text>
-          </View>
-        ) : null}
-      </View>
-
-      <Text style={[styles.cardTitle, { color: palette.ink }]}>{room.title}</Text>
-
-      {/* Host avatar + name + counts */}
-      {room.hostName ? (
-        <View style={styles.cardIdentityRow}>
-          <Avatar name={room.hostName} size="sm" />
-          <View style={styles.cardIdentityText}>
-            <Text style={[styles.cardHostName, { color: palette.ink }]} numberOfLines={1}>
-              {room.hostName}{" "}
-              <Text style={[styles.cardHostRole, { color: palette.quiet }]}>HOST</Text>
-            </Text>
-            <Text style={[styles.cardCounts, { color: palette.quiet }]}>
-              {room.listeners} listening · {room.speakers} on stage
-            </Text>
-          </View>
-        </View>
-      ) : (
-        <Text style={[styles.cardCounts, { color: palette.quiet, marginTop: 10 }]}>
-          {room.listeners} listening · {room.speakers} on stage
-        </Text>
-      )}
-
-      {/* RE: — Direction B's story-tie line, falls back to description. */}
-      {room.description ? (
-        <View style={styles.reRow}>
-          <Text style={[styles.reLabel, { color: palette.quiet }]}>RE:</Text>
-          <Text style={[styles.reBody, { color: palette.ink2 }]} numberOfLines={3}>
-            {room.description}
-          </Text>
-        </View>
-      ) : null}
-    </Pressable>
-  );
-}
-
-function accessibilityLabel(room: DiscoverRoom): string {
-  const parts: string[] = [room.title, "Live now"];
-  if (room.isFull) parts.push("Room is full");
-  if (room.hostName) parts.push(`Hosted by ${room.hostName}`);
-  parts.push(`${room.listeners} listening`);
-  parts.push(`${room.speakers} on stage`);
-  return parts.join(". ") + ".";
-}
-
-function elapsedSince(iso: string): string {
-  const diffMs = Date.now() - new Date(iso).getTime();
-  const totalSec = Math.max(0, Math.floor(diffMs / 1000));
-  const h = Math.floor(totalSec / 3600);
-  const m = Math.floor((totalSec % 3600) / 60);
-  const s = totalSec % 60;
-  if (h > 0) return `${h}:${pad(m)}:${pad(s)}`;
-  return `${m}:${pad(s)}`;
-}
-function pad(n: number): string {
-  return n < 10 ? `0${n}` : `${n}`;
 }
 
 /* -------------------------------------------------------- Section header */
@@ -651,29 +452,37 @@ function OpenRoomDockActive({
         },
       ]}
     >
-      <Pressable
-        onPress={() => router.push("/chautari/new")}
-        accessibilityRole="button"
-        accessibilityLabel="Open a Chautari room"
-        style={({ pressed }) => [
-          styles.dockBtn,
-          { backgroundColor: palette.ink },
-          pressed && styles.pressed,
-        ]}
-      >
-        <Text style={[styles.dockBtnText, { color: palette.paper }]}>+  OPEN A ROOM</Text>
-      </Pressable>
+      <View style={styles.dockRow}>
+        <Pressable
+          onPress={() => router.push("/chautari/mine")}
+          accessibilityRole="button"
+          accessibilityLabel="Your rooms: ones you host or moderate"
+          style={({ pressed }) => [
+            styles.dockBtn,
+            styles.dockSecondary,
+            { borderColor: palette.ink },
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={[styles.dockBtnText, { color: palette.ink }]}>Your rooms</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => router.push("/chautari/new")}
+          accessibilityRole="button"
+          accessibilityLabel="Open or schedule a Chautari room"
+          style={({ pressed }) => [
+            styles.dockBtn,
+            styles.dockPrimary,
+            { backgroundColor: palette.ink },
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={[styles.dockBtnText, { color: palette.paper }]}>+  Open a room</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
-
-/* --------------------------------------------------------------- unused imports kept
- * `formatDateTime`, `timeAgo` and `initialsFor` are imported for compatibility with
- * downstream reporting; harmless if unreferenced after the Direction B refactor.
- * ----------------------------------------------------------------------- */
-void formatDateTime;
-void timeAgo;
-void initialsFor;
 
 /* ------------------------------------------------------------------- Styles */
 
@@ -746,42 +555,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
 
-  /* ---- Scheduled row ---- */
-  schedRow: {
-    flexDirection: "row",
-    gap: 16,
-    paddingVertical: 14,
-    paddingTop: 14,
-  },
-  schedStamp: {
-    width: 86,
-    paddingTop: 2,
-  },
-  schedDay: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 10.5,
-    letterSpacing: 1.3,
-    textTransform: "uppercase",
-  },
-  schedTime: {
-    fontFamily: fontFamilies.serifMedium,
-    fontSize: 15.5,
-    marginTop: 2,
-    letterSpacing: -0.2,
-  },
-  schedBody: { flex: 1, minWidth: 0 },
-  schedTitle: {
-    fontFamily: fontFamilies.serifMedium,
-    fontSize: 17,
-    lineHeight: 22,
-    letterSpacing: -0.2,
-  },
-  schedMeta: {
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 12,
-    marginTop: 4,
-  },
-
   /* ---- Signed-in bar ---- */
   signedInBar: {
     flexDirection: "row",
@@ -810,90 +583,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
 
-  /* ---- Live room card ---- */
-  card: { paddingVertical: 20 },
-  cardKicker: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flexWrap: "wrap",
-  },
-  liveDot: { width: 7, height: 7, borderRadius: 3.5 },
-  liveLabel: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 10.5,
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-  },
-  cardMeta: {
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 11.5,
-  },
-  fullChip: {
-    borderWidth: 1,
-    paddingHorizontal: 6,
-    paddingVertical: 1,
-    marginLeft: 4,
-  },
-  fullChipText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 9.5,
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-  },
-  cardTitle: {
-    fontFamily: fontFamilies.serifLight,
-    fontSize: 24,
-    lineHeight: 29,
-    letterSpacing: -0.5,
-    marginTop: 8,
-  },
-
-  cardIdentityRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginTop: 14,
-  },
-  cardIdentityText: { flex: 1, minWidth: 0 },
-  cardHostName: {
-    fontFamily: fontFamilies.serifMedium,
-    fontSize: 14.5,
-  },
-  cardHostRole: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 10,
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-  },
-  cardCounts: {
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 12,
-    marginTop: 2,
-  },
-
-  reRow: {
-    flexDirection: "row",
-    gap: 8,
-    marginTop: 12,
-    paddingTop: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: "transparent",
-  },
-  reLabel: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 10.5,
-    letterSpacing: 1.3,
-    textTransform: "uppercase",
-    paddingTop: 3,
-  },
-  reBody: {
-    flex: 1,
-    fontFamily: fontFamilies.serifRegular,
-    fontSize: 14.5,
-    lineHeight: 21,
-  },
-
   /* ---- OPEN A ROOM dock ---- */
   dock: {
     position: "absolute",
@@ -904,11 +593,14 @@ const styles = StyleSheet.create({
     paddingTop: 10,
     borderTopWidth: 1,
   },
+  dockRow: { flexDirection: "row", gap: 10 },
   dockBtn: {
     minHeight: 54,
     alignItems: "center",
     justifyContent: "center",
   },
+  dockSecondary: { borderWidth: 1, paddingHorizontal: 18 },
+  dockPrimary: { flex: 1 },
   dockBtnText: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 12.5,

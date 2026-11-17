@@ -65,6 +65,14 @@ export interface RoomMember {
    * both cases, which is what it drew before.
    */
   avatarUrl: string | null;
+  /** Their public @handle, when they have a profile. Opens `/user/<username>`. */
+  username: string | null;
+  /** The room's host, as the server marked them in the token. */
+  isHost: boolean;
+  /** Holds the host's controls; can change mid-room, so read from attributes. */
+  isModerator: boolean;
+  /** A hand the server has put up for them; cleared when the host answers. */
+  handRaised: boolean;
 }
 
 /** Identity of the room itself, as the SERVER reported it with the grant. */
@@ -122,7 +130,7 @@ function applyBlocks(room: Room, blocked: ReadonlySet<string>): void {
 }
 
 /**
- * The avatar a participant is carrying, if any.
+ * The public profile a participant is carrying: avatar, username, host flag.
  *
  * `metadata` is a free-form string that LiveKit relays verbatim, so every
  * assumption about it has to be checked here: it can be absent, it can be a
@@ -135,17 +143,31 @@ function applyBlocks(room: Room, blocked: ReadonlySet<string>): void {
  * and `data:` or `file:` arriving from a room full of strangers is not
  * something to hand to the image loader.
  */
-function avatarFromMetadata(metadata?: string): string | null {
-  if (!metadata) return null;
+function profileFromMetadata(metadata?: string): {
+  avatarUrl: string | null;
+  username: string | null;
+  isHost: boolean;
+} {
+  const none = { avatarUrl: null, username: null, isHost: false };
+  if (!metadata) return none;
   try {
     const parsed: unknown = JSON.parse(metadata);
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const avatar = (parsed as { avatar?: unknown }).avatar;
-    if (typeof avatar !== "string") return null;
-    const trimmed = avatar.trim();
-    return /^https?:\/\//i.test(trimmed) ? trimmed : null;
+    if (typeof parsed !== "object" || parsed === null) return none;
+    const { avatar, username, host } = parsed as {
+      avatar?: unknown;
+      username?: unknown;
+      host?: unknown;
+    };
+    const trimmed = typeof avatar === "string" ? avatar.trim() : "";
+    return {
+      avatarUrl: /^https?:\/\//i.test(trimmed) ? trimmed : null,
+      // Same shape the server enforces; anything else is not a handle.
+      username:
+        typeof username === "string" && /^[a-z0-9_]{3,30}$/.test(username) ? username : null,
+      isHost: host === true,
+    };
   } catch {
-    return null;
+    return none;
   }
 }
 
@@ -153,13 +175,20 @@ function toMember(p: Participant, isLocal: boolean): RoomMember {
   const micTrack = [...p.audioTrackPublications.values()][0];
   return {
     identity: p.identity,
-    name: p.name?.trim() || p.identity,
+    // `p.identity` is the Clerk user id. Rendering it would expose a string
+    // like `user_asodifhoq2ijf` — the pre-PR-5 behavior that made the
+    // display-name bug visible in the first place. "Guest" is reserved for
+    // participants whose server-side display_name resolution also failed;
+    // see site/src/lib/chautari/displayName.ts.
+    name: p.name?.trim() || "Guest",
     isSpeaking: p.isSpeaking,
     // No publication at all reads as muted: nothing is being heard either way.
     isMuted: micTrack ? micTrack.isMuted : true,
     canPublish: Boolean(p.permissions?.canPublish),
     isLocal,
-    avatarUrl: avatarFromMetadata(p.metadata),
+    ...profileFromMetadata(p.metadata),
+    handRaised: Boolean(p.attributes?.hand),
+    isModerator: Boolean(p.attributes?.mod),
   };
 }
 
@@ -172,7 +201,11 @@ function sameMember(a: RoomMember, b: RoomMember): boolean {
     a.isMuted === b.isMuted &&
     a.canPublish === b.canPublish &&
     a.isLocal === b.isLocal &&
-    a.avatarUrl === b.avatarUrl
+    a.avatarUrl === b.avatarUrl &&
+    a.username === b.username &&
+    a.isHost === b.isHost &&
+    a.handRaised === b.handRaised &&
+    a.isModerator === b.isModerator
   );
 }
 
@@ -410,6 +443,7 @@ export function useChautariRoom(
           .on(RoomEvent.ActiveSpeakersChanged, () => syncMembers(room))
           /* A picture set or cleared mid-room, relayed by LiveKit. */
           .on(RoomEvent.ParticipantMetadataChanged, () => syncMembers(room))
+          .on(RoomEvent.ParticipantAttributesChanged, () => syncMembers(room))
           .on(RoomEvent.LocalTrackPublished, () => {
             setMicEnabled(room.localParticipant.isMicrophoneEnabled);
             syncMembers(room);

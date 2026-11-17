@@ -12,7 +12,7 @@ import { CHAUTARI_API_URL } from "@/constants/config";
  * React — the caller gets it from Clerk's `useAuth()` and hands it over.
  */
 
-export type RoomRole = "host" | "speaker" | "listener";
+export type RoomRole = "host" | "moderator" | "speaker" | "listener";
 export type RoomStatus = "scheduled" | "live" | "ended";
 
 export interface DiscoverRoom {
@@ -26,6 +26,41 @@ export interface DiscoverRoom {
   listeners: number;
   speakers: number;
   isFull: boolean;
+  /** Cover photo, 16:9. Null for rooms without one (and older servers). */
+  bannerUrl?: string | null;
+  hostUsername?: string | null;
+  hostAvatarUrl?: string | null;
+}
+
+/** A person shown on a room's details: its host or a moderator. */
+export interface RoomPerson {
+  name: string;
+  username: string | null;
+  avatarUrl: string | null;
+}
+
+/** One room's public details, for the waiting room before it goes live. */
+export interface RoomDetails {
+  slug: string;
+  title: string;
+  description: string | null;
+  status: RoomStatus;
+  scheduledFor: string | null;
+  startedAt: string | null;
+  bannerUrl: string | null;
+  host: RoomPerson;
+  moderators: RoomPerson[];
+}
+
+/** A room the reader hosts or moderates, on the "Your rooms" page. */
+export interface MyRoom {
+  slug: string;
+  title: string;
+  status: "scheduled" | "live";
+  scheduledFor: string | null;
+  startedAt: string | null;
+  bannerUrl: string | null;
+  role: "host" | "moderator";
 }
 
 export interface JoinGrant {
@@ -68,9 +103,11 @@ async function call<T>(
   path: string,
   init: RequestInit,
   getToken?: GetToken,
+  /** A photo upload over a mobile connection needs longer than a JSON call. */
+  timeoutMs: number = CHAUTARI_FETCH_TIMEOUT_MS,
 ): Promise<T> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), CHAUTARI_FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   let headers: Record<string, string> = { "content-type": "application/json" };
   if (getToken) {
@@ -128,14 +165,64 @@ export async function discoverRooms(): Promise<DiscoverRoom[]> {
 
 export async function openRoom(
   getToken: GetToken,
-  args: { title: string; description?: string; hostName?: string | null },
-): Promise<{ slug: string; title: string }> {
-  const res = await call<{ room: { slug: string; title: string } }>(
+  args: {
+    title: string;
+    description?: string;
+    hostName?: string | null;
+    /** ISO time to book the room for; omitted opens it now. */
+    scheduledFor?: string | null;
+    /** A URL returned by `uploadBanner`. */
+    bannerUrl?: string | null;
+    /** Up to three @handles to make moderators from the start. */
+    moderators?: string[];
+  },
+): Promise<{ slug: string; title: string; status: RoomStatus }> {
+  const res = await call<{ room: { slug: string; title: string; status: RoomStatus } }>(
     "/api/chautari/rooms",
     { method: "POST", body: JSON.stringify(args) },
     getToken,
   );
   return res.room;
+}
+
+/**
+ * Upload a cover photo for a room about to be created. The server resizes it
+ * and returns the URL to pass to `openRoom`.
+ */
+export async function uploadBanner(getToken: GetToken, base64: string): Promise<string> {
+  const res = await call<{ url: string }>(
+    "/api/chautari/banner",
+    { method: "POST", body: JSON.stringify({ image: base64 }) },
+    getToken,
+    60_000,
+  );
+  return res.url;
+}
+
+/** Go live: start a booked room. Host or an assigned moderator only. */
+export async function startRoom(getToken: GetToken, slug: string): Promise<void> {
+  await call("/api/chautari/rooms/start", { method: "POST", body: JSON.stringify({ slug }) }, getToken);
+}
+
+/**
+ * A room's public details. Pass `getToken` when signed in to also learn
+ * whether this reader may start it.
+ */
+export async function getRoomDetails(
+  slug: string,
+  getToken?: GetToken,
+): Promise<{ room: RoomDetails; canStart: boolean }> {
+  return call<{ room: RoomDetails; canStart: boolean }>(
+    `/api/chautari/rooms/${encodeURIComponent(slug)}`,
+    { method: "GET" },
+    getToken,
+  );
+}
+
+/** Rooms the reader hosts or moderates, live or booked. */
+export async function getMyRooms(getToken: GetToken): Promise<MyRoom[]> {
+  const res = await call<{ rooms: MyRoom[] }>("/api/chautari/rooms/mine", { method: "GET" }, getToken);
+  return res.rooms ?? [];
 }
 
 export async function endRoom(getToken: GetToken, slug: string): Promise<void> {
@@ -163,11 +250,20 @@ export async function requestJoin(
   );
 }
 
+/**
+ * Raise or lower a hand. `visible` is whether the room was told: when true,
+ * the hand arrives as a participant attribute; an older server omits it.
+ */
 export async function setHandRaised(
   getToken: GetToken,
   args: { roomSlug: string; raised: boolean; displayName?: string | null },
-): Promise<void> {
-  await call("/api/chautari/hand", { method: "POST", body: JSON.stringify(args) }, getToken);
+): Promise<{ visible: boolean }> {
+  const res = await call<{ visible?: boolean }>(
+    "/api/chautari/hand",
+    { method: "POST", body: JSON.stringify(args) },
+    getToken,
+  );
+  return { visible: res.visible === true };
 }
 
 export type ModerationAction =
@@ -175,7 +271,9 @@ export type ModerationAction =
   | "deny_speaker"
   | "demote_speaker"
   | "mute"
-  | "remove";
+  | "remove"
+  | "make_moderator"
+  | "remove_moderator";
 
 export async function moderate(
   getToken: GetToken,

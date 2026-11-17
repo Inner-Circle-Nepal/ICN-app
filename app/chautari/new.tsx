@@ -11,6 +11,15 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth, useUser } from "@clerk/clerk-expo";
+import { useMyProfile } from "@/features/profile/useMyProfile";
+import {
+  BannerField,
+  MAX_MODERATORS,
+  ModeratorsField,
+  WhenField,
+  type PickedModerator,
+  type When,
+} from "@/components/chautari/NewRoomFields";
 import Svg, { Path } from "react-native-svg";
 
 import { ChautariError, openRoom } from "@/lib/api/chautari";
@@ -87,20 +96,28 @@ function NewRoomScreenActive() {
   const { palette } = useTheme();
   const { getToken } = useAuth();
   const { user } = useUser();
+  const { profile } = useMyProfile();
 
   const [headline, setHeadline] = useState("");
   const [standfirst, setStandfirst] = useState("");
+  const [when, setWhen] = useState<When>({ mode: "now" });
+  const [bannerUrl, setBannerUrl] = useState<string | null>(null);
+  const [moderators, setModerators] = useState<PickedModerator[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const scheduling = when.mode === "later";
 
   /*
    * The dateline is captured ONCE on mount. A byline doesn't tick — the time
    * printed is when the room was filed, not when the form is being read.
    */
   const dateline = useMemo(() => formatDateline(new Date()), []);
+  // Prefer the reader_profiles display_name so the "filed by" line matches
+  // what other participants will see once the room opens. Email is kept as a
+  // last-resort fallback for the very brief pre-PR-6 window where a signed-in
+  // reader may not have a profile row yet.
   const filedBy =
-    user?.fullName?.trim() ||
-    user?.firstName?.trim() ||
+    profile?.display_name ||
     user?.primaryEmailAddress?.emailAddress ||
     "You";
 
@@ -115,16 +132,27 @@ function NewRoomScreenActive() {
       setError("Give the conversation a headline.");
       return;
     }
+    if (when.mode === "later" && !when.iso) {
+      setError("Pick a day and a time for the room.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       const room = await openRoom(getToken, {
         title: clean,
         description: standfirst.trim() || undefined,
-        hostName: user?.fullName?.trim() || user?.firstName?.trim() || null,
+        // Server always resolves display_name from reader_profiles anyway
+        // (see PR 3 fix), but we still send the local value so a fresh
+        // profile update that hasn't yet propagated through the cache does
+        // not slip into "Guest" in the moment after save.
+        hostName: profile?.display_name ?? null,
+        scheduledFor: when.mode === "later" ? when.iso : null,
+        bannerUrl,
+        moderators: moderators.map((m) => m.username),
       });
-      // Replace, not push: backing out of a live room should not land the
-      // host on the form that created it.
+      // Replace, not push: backing out of the room should not land the host
+      // on the form that created it. A booked room opens to its waiting room.
       router.replace(`/chautari/${encodeURIComponent(room.slug)}`);
     } catch (e) {
       setError(
@@ -161,7 +189,11 @@ function NewRoomScreenActive() {
       </View>
 
       <ScrollView contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled">
-        <Chyron left="NEW ROOM · NOT YET ON AIR" right="Draft" palette={palette} />
+        <Chyron
+          left={scheduling ? "NEW ROOM · FOR THE SCHEDULE" : "NEW ROOM · NOT YET ON AIR"}
+          right="Draft"
+          palette={palette}
+        />
 
         <Text style={[styles.kicker, { color: palette.quiet }]}>Host a conversation</Text>
         <Text style={[styles.title, { color: palette.ink }]}>Open a Chautari</Text>
@@ -215,6 +247,33 @@ function NewRoomScreenActive() {
           ]}
         />
 
+        <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
+          Cover photo · optional
+        </Text>
+        <Text style={[styles.sectionHint, { color: palette.quiet }]}>
+          Shown at the top of the room and on its card in Chautari.
+        </Text>
+        <BannerField url={bannerUrl} onChange={setBannerUrl} getToken={getToken} disabled={busy} />
+
+        <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
+          When
+        </Text>
+        <WhenField value={when} onChange={setWhen} disabled={busy} />
+
+        <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
+          Moderators · optional
+        </Text>
+        <Text style={[styles.sectionHint, { color: palette.quiet }]}>
+          Up to {MAX_MODERATORS} readers who share your controls. They can start a scheduled room
+          if you are running late, and run it with you.
+        </Text>
+        <ModeratorsField
+          value={moderators}
+          onChange={setModerators}
+          ownUsername={profile?.username ?? null}
+          disabled={busy}
+        />
+
         {error ? (
           <Text style={[styles.error, { color: palette.red }]} accessibilityRole="alert">
             {error}
@@ -235,7 +294,9 @@ function NewRoomScreenActive() {
           {busy ? (
             <ActivityIndicator size="small" color={palette.paper} />
           ) : (
-            <Text style={[styles.primaryText, { color: palette.paper }]}>Open the room</Text>
+            <Text style={[styles.primaryText, { color: palette.paper }]}>
+              {scheduling ? "Put it on the schedule" : "Open the room"}
+            </Text>
           )}
         </Pressable>
 
@@ -445,6 +506,24 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   multiline: { minHeight: 92, textAlignVertical: "top" },
+
+  sectionLabel: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 11,
+    letterSpacing: 1.5,
+    textTransform: "uppercase",
+    borderBottomWidth: 1,
+    paddingBottom: 6,
+    marginTop: 30,
+    marginBottom: 12,
+  },
+  sectionHint: {
+    fontFamily: fontFamilies.serifRegular,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: -4,
+    marginBottom: 12,
+  },
 
   error: { fontFamily: fontFamilies.sansRegular, fontSize: 13, lineHeight: 19, marginTop: 14 },
 

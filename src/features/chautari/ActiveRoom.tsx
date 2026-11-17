@@ -7,7 +7,8 @@ import React, {
   useState,
   useSyncExternalStore,
 } from "react";
-import { useAuth, useUser } from "@clerk/clerk-expo";
+import { useAuth } from "@clerk/clerk-expo";
+import { useMyProfile } from "@/features/profile/useMyProfile";
 import { isClerkConfigured } from "@/constants/config";
 import { startBackgroundAudio, stopBackgroundAudio } from "@/lib/livekit/backgroundAudio";
 import { isLiveKitAvailable } from "@/lib/livekit/platform";
@@ -136,8 +137,8 @@ function RoomRunner({
   store: RoomStore;
 }) {
   const { isSignedIn, getToken } = useAuth();
-  const { user } = useUser();
-  const displayName = user?.fullName?.trim() || user?.firstName?.trim() || null;
+  const { profile } = useMyProfile();
+  const displayName = profile?.display_name ?? null;
 
   const room = useChautariRoom(slug, getToken, displayName);
 

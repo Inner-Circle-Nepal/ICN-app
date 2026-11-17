@@ -20,38 +20,38 @@ import { isClerkConfigured } from "@/constants/config";
 import { editions } from "@/constants/site";
 import { subscribeToNewsletter } from "@/lib/api/newsletter";
 import { profileImageDataUri } from "@/features/profile/photo";
+import { useMyProfile, useUpdateMyProfile } from "@/features/profile/useMyProfile";
+import {
+  normalizeDisplayName,
+  validateBio,
+  validateDisplayName,
+} from "@/features/profile/validators";
 import { Avatar } from "@/components/chautari/Avatar";
 import { ErrorState } from "@/components/ErrorState";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
 
 /**
- * Your reader account.
+ * Your reader profile.
  *
- * ## What a reader account actually is here
+ * Editable: `display_name`, `bio`, profile picture. These live in the
+ * `reader_profiles` row keyed on the Clerk user id — the same row other
+ * readers see on your public /user/<handle> page. Changes go through
+ * `PATCH /api/reader/profile/me` on the website backend.
  *
- * Very little, deliberately. Reading is free and needs no account; what an
- * account buys is a Chautari microphone, an edition that follows you between
- * devices, and the weekday briefing. So this screen edits the small number of
- * things that genuinely exist rather than inventing a social profile.
+ * Picture upload keeps using Clerk's `user.setProfileImage()` because
+ * Clerk hosts the image on their CDN (no Supabase storage cost) and
+ * handles resizing. The resulting URL is then mirrored into
+ * `reader_profiles.avatar_url` so other readers can read it directly
+ * from Supabase without a Clerk round trip.
  *
- * ## Why there is no profile photograph
+ * Read-only: `username` (the public @handle, immutable in v1 — changing
+ * it would break follower links), `email` (the verified sign-in identity,
+ * changing it is a verification flow and does not belong here).
  *
- * There is nowhere to put one. No Chautari payload carries an avatar URL,
- * `chautari_participants` has no column for it, and the only `avatar_url` in
- * the schema belongs to `authors` — journalists' bylines, not readers.
- * Uploading to Clerk's own storage would work today and then die at the
- * authentication cutover, leaving every reader's picture at a dead
- * `img.clerk.com` URL. Pictures are deferred to the auth migration, where
- * they get a table and a bucket we own. Initials until then — see
- * `components/chautari/Avatar.tsx`.
- *
- * ## What is editable, and by whom
- *
- * The name goes through Clerk's client SDK, which is allowed to change it.
- * The email is shown and NOT editable: it is the verified identity the
- * Chautari endpoints authorise against, and changing it is a verification
- * flow rather than a text field.
+ * Clerk's `firstName`/`lastName` are no longer used. If an older reader
+ * had them set, those values are ignored going forward — `display_name`
+ * is now the authoritative name field.
  */
 /**
  * Outer guard: `useAuth`/`useUser` throw outside <ClerkProvider>, which is
@@ -90,65 +90,77 @@ function ProfileScreenActive() {
   const insets = useSafeAreaInsets();
   const { isSignedIn, isLoaded, signOut } = useAuth();
   const { user } = useUser();
+  const { profile, isLoading: profileLoading } = useMyProfile();
+  const update = useUpdateMyProfile();
 
   /*
    * The fields hold a DRAFT, not a copy.
    *
-   * `null` means "untouched — show whatever Clerk currently has". Mirroring
-   * the user resource into state with an effect would mean a `setState` in
-   * an effect body, which cascades a second render on every arrival of the
-   * user object; deriving it needs no effect and cannot go stale, because
-   * Clerk remains the source until the reader actually types.
+   * `null` means "untouched — show whatever the server last returned."
+   * Mirroring the profile into state with an effect would mean a setState
+   * in an effect body (rendering twice) and would get stale against a
+   * mutation elsewhere in the app. Deriving the displayed value needs no
+   * effect and reconciles automatically on refetch.
    */
-  const [draftFirst, setDraftFirst] = useState<string | null>(null);
-  const [draftLast, setDraftLast] = useState<string | null>(null);
-  const [savingName, setSavingName] = useState(false);
+  const [draftDisplayName, setDraftDisplayName] = useState<string | null>(null);
+  const [draftBio, setDraftBio] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [subscribing, setSubscribing] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
 
-  const savedFirst = user?.firstName ?? "";
-  const savedLast = user?.lastName ?? "";
-  const firstName = draftFirst ?? savedFirst;
-  const lastName = draftLast ?? savedLast;
+  const savedDisplayName = profile?.display_name ?? "";
+  const savedBio = profile?.bio ?? "";
+  const displayNameField = draftDisplayName ?? savedDisplayName;
+  const bioField = draftBio ?? savedBio;
 
   const email = user?.primaryEmailAddress?.emailAddress ?? null;
-  const displayName =
-    user?.fullName?.trim() || user?.firstName?.trim() || email?.split("@")[0] || "Reader";
+  // Heading falls back cleanly so the screen is still legible for the brief
+  // pre-PR-6 window when a reader may be signed in without a profile row.
+  const headingName = profile?.display_name || email?.split("@")[0] || "Reader";
 
-  const dirty = firstName.trim() !== savedFirst || lastName.trim() !== savedLast;
+  const displayCheck = validateDisplayName(displayNameField);
+  const bioCheck = validateBio(bioField);
+  const dirty =
+    (draftDisplayName !== null && normalizeDisplayName(draftDisplayName) !== savedDisplayName) ||
+    (draftBio !== null && draftBio.trim() !== savedBio);
+  const canSave = dirty && displayCheck.ok && bioCheck.ok && !update.isPending;
 
   const back = useCallback(() => {
     if (router.canGoBack()) router.back();
     else router.replace("/settings");
   }, [router]);
 
-  const saveName = useCallback(async () => {
-    if (!user || savingName) return;
-    setSavingName(true);
+  const saveProfile = useCallback(async () => {
+    if (!canSave) return;
     setNotice(null);
     setError(null);
     try {
-      await user.update({
-        firstName: firstName.trim() || null,
-        lastName: lastName.trim() || null,
-      });
-      /* Hand the fields back to Clerk's value now that it is authoritative. */
-      setDraftFirst(null);
-      setDraftLast(null);
-      setNotice("Your name has been updated.");
+      const payload: { display_name?: string; bio?: string | null } = {};
+      if (draftDisplayName !== null) {
+        payload.display_name = normalizeDisplayName(draftDisplayName);
+      }
+      if (draftBio !== null) {
+        const trimmed = draftBio.trim();
+        payload.bio = trimmed.length === 0 ? null : trimmed;
+      }
+      await update.mutateAsync(payload);
+      setDraftDisplayName(null);
+      setDraftBio(null);
+      setNotice("Your profile has been updated.");
     } catch (e) {
-      /* Clerk's errors are structured; show the first, never a stack. */
-      const errs = (e as { errors?: { longMessage?: string; message?: string }[] })?.errors;
-      setError(errs?.[0]?.longMessage || errs?.[0]?.message || "Could not save your name.");
-    } finally {
-      setSavingName(false);
+      setError((e as Error).message || "Could not save your profile.");
     }
-  }, [user, savingName, firstName, lastName]);
+  }, [canSave, draftBio, draftDisplayName, update]);
 
   /**
    * Choose a new profile picture.
+   *
+   * Two-step: upload to Clerk's CDN via `user.setProfileImage`, then mirror
+   * the resulting URL into `reader_profiles.avatar_url` so other readers can
+   * read it directly from Supabase. Both steps must succeed — if the mirror
+   * step fails, the picture is still on Clerk's CDN but other readers would
+   * see initials until the next successful save, so surface the failure.
    *
    * The library picker needs no permission — on Android 13+ the system photo
    * picker hands back exactly the one image the reader selected and nothing
@@ -191,6 +203,11 @@ function ProfileScreenActive() {
     setPhotoBusy(true);
     try {
       await user.setProfileImage({ file });
+      // Clerk returns the new imageUrl after reload; mirror it into our
+      // reader_profiles row so other readers' queries see it immediately.
+      await user.reload();
+      const url = user.hasImage ? user.imageUrl : null;
+      await update.mutateAsync({ avatar_url: url });
       setNotice("Your profile picture has been updated.");
     } catch (e) {
       const errs = (e as { errors?: { longMessage?: string; message?: string }[] })?.errors;
@@ -198,9 +215,13 @@ function ProfileScreenActive() {
     } finally {
       setPhotoBusy(false);
     }
-  }, [user, photoBusy]);
+  }, [user, photoBusy, update]);
 
-  /** Remove it. `setProfileImage({ file: null })` is Clerk's delete. */
+  /**
+   * Remove the picture. `setProfileImage({ file: null })` is Clerk's delete;
+   * we follow it with a null `avatar_url` PATCH so other readers see initials
+   * instead of a now-dead URL.
+   */
   const removePhoto = useCallback(() => {
     if (!user || photoBusy) return;
     Alert.alert("Remove your picture?", "Your initials will be shown instead.", [
@@ -214,13 +235,14 @@ function ProfileScreenActive() {
           setError(null);
           void user
             .setProfileImage({ file: null })
+            .then(() => update.mutateAsync({ avatar_url: null }))
             .then(() => setNotice("Your picture has been removed."))
             .catch(() => setError("Could not remove that picture."))
             .finally(() => setPhotoBusy(false));
         },
       },
     ]);
-  }, [user, photoBusy]);
+  }, [user, photoBusy, update]);
 
   const joinBriefing = useCallback(async () => {
     if (!email || subscribing) return;
@@ -229,13 +251,13 @@ function ProfileScreenActive() {
     setError(null);
     const result = await subscribeToNewsletter({
       email,
-      name: displayName,
+      name: headingName,
       source: "mobile-profile",
     });
     if (result.ok) setNotice(result.message);
     else setError(result.message);
     setSubscribing(false);
-  }, [email, displayName, subscribing]);
+  }, [email, headingName, subscribing]);
 
   const confirmSignOut = useCallback(() => {
     Alert.alert(
@@ -309,7 +331,7 @@ function ProfileScreenActive() {
     );
   }
 
-  if (!isLoaded) {
+  if (!isLoaded || profileLoading) {
     return (
       <Shell onBack={back}>
         <View style={styles.loading}>
@@ -326,6 +348,19 @@ function ProfileScreenActive() {
           title="You are not signed in"
           message="Reading needs no account. Sign in to join a Chautari conversation and to keep your edition between devices."
           onRetry={() => router.push("/sign-in")}
+        />
+      </Shell>
+    );
+  }
+
+  // Signed in but no profile row yet — the pre-PR-6 window. After PR 6 ships,
+  // the route guard in `_layout.tsx` catches this earlier.
+  if (!profile) {
+    return (
+      <Shell onBack={back}>
+        <ErrorState
+          title="Finish setting up your profile"
+          message="You're signed in but your reader profile isn't complete yet. Update the app and sign in again to finish signup."
         />
       </Shell>
     );
@@ -354,15 +389,18 @@ function ProfileScreenActive() {
               style={({ pressed }) => [styles.photoTap, pressed && styles.pressed]}
             >
               <Avatar
-                name={displayName}
+                name={headingName}
                 size="lg"
                 /*
                  * `hasImage` distinguishes a real photograph from the
                  * placeholder Clerk generates for every account — without it
                  * the avatar would always render a remote image and the
-                 * initials would never be seen.
+                 * initials would never be seen. We prefer the mirrored
+                 * `profile.avatar_url` because that is also what other
+                 * readers see; falling back to Clerk's current `imageUrl`
+                 * keeps the own-avatar fresh between upload and PATCH.
                  */
-                imageUrl={user.hasImage ? user.imageUrl : null}
+                imageUrl={profile.avatar_url ?? (user.hasImage ? user.imageUrl : null)}
               />
               {photoBusy ? (
                 <View style={[styles.photoBusy, { backgroundColor: palette.paper }]}>
@@ -373,7 +411,10 @@ function ProfileScreenActive() {
 
             <View style={styles.identityText}>
               <Text style={[styles.name, { color: palette.ink }]} numberOfLines={2}>
-                {displayName}
+                {headingName}
+              </Text>
+              <Text style={[styles.handle, { color: palette.quiet }]} numberOfLines={1}>
+                @{profile.username}
               </Text>
               {email ? (
                 <Text style={[styles.email, { color: palette.quiet }]} numberOfLines={1}>
@@ -429,58 +470,87 @@ function ProfileScreenActive() {
             </View>
           ) : null}
 
-          {/* ---------------------------------------------------- name */}
+          {/* ------------------------------------------------- profile */}
           <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
             Your name
           </Text>
           <Text style={[styles.sectionHint, { color: palette.quiet }]}>
-            This is what other people see when you speak in a Chautari room.
+            This is what other readers see — on Chautari rooms, follower
+            lists, and your public profile.
           </Text>
 
-          <Text style={[styles.fieldLabel, { color: palette.quiet }]}>First name</Text>
+          <Text style={[styles.fieldLabel, { color: palette.quiet }]}>Display name</Text>
           <TextInput
-            value={firstName}
-            onChangeText={setDraftFirst}
-            placeholder="First name"
+            value={displayNameField}
+            onChangeText={setDraftDisplayName}
+            placeholder="Your name"
             placeholderTextColor={palette.quiet}
-            editable={!savingName}
+            editable={!update.isPending}
             autoCapitalize="words"
-            autoComplete="given-name"
-            accessibilityLabel="First name"
+            maxLength={60}
+            accessibilityLabel="Display name"
             style={[styles.input, { borderColor: palette.rule2, color: palette.ink }]}
           />
+          {draftDisplayName !== null && !displayCheck.ok ? (
+            <Text style={[styles.fieldError, { color: palette.red }]}>
+              {displayCheck.message}
+            </Text>
+          ) : null}
 
-          <Text style={[styles.fieldLabel, { color: palette.quiet }]}>Last name</Text>
+          <Text style={[styles.fieldLabel, { color: palette.quiet }]}>Bio</Text>
           <TextInput
-            value={lastName}
-            onChangeText={setDraftLast}
-            placeholder="Last name"
+            value={bioField}
+            onChangeText={setDraftBio}
+            placeholder="A short line about you (optional)"
             placeholderTextColor={palette.quiet}
-            editable={!savingName}
-            autoCapitalize="words"
-            autoComplete="family-name"
-            accessibilityLabel="Last name"
-            style={[styles.input, { borderColor: palette.rule2, color: palette.ink }]}
+            editable={!update.isPending}
+            multiline
+            numberOfLines={3}
+            maxLength={240}
+            accessibilityLabel="Bio"
+            style={[
+              styles.input,
+              styles.bioInput,
+              { borderColor: palette.rule2, color: palette.ink },
+            ]}
           />
+          {draftBio !== null && !bioCheck.ok ? (
+            <Text style={[styles.fieldError, { color: palette.red }]}>
+              {bioCheck.message}
+            </Text>
+          ) : null}
 
           <Pressable
-            onPress={() => void saveName()}
-            disabled={!dirty || savingName}
+            onPress={() => void saveProfile()}
+            disabled={!canSave}
             accessibilityRole="button"
-            accessibilityLabel="Save your name"
-            accessibilityState={{ disabled: !dirty || savingName }}
+            accessibilityLabel="Save your profile"
+            accessibilityState={{ disabled: !canSave }}
             style={({ pressed }) => [
               styles.primary,
-              { backgroundColor: !dirty || savingName ? palette.rule2 : palette.ink },
+              { backgroundColor: canSave ? palette.ink : palette.rule2 },
               pressed && styles.pressed,
             ]}
           >
-            {savingName ? (
+            {update.isPending ? (
               <ActivityIndicator size="small" color={palette.paper} />
             ) : (
-              <Text style={[styles.primaryText, { color: palette.paper }]}>Save name</Text>
+              <Text style={[styles.primaryText, { color: palette.paper }]}>Save profile</Text>
             )}
           </Pressable>
+
+          {/* ------------------------------------------------ username */}
+          <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
+            Username
+          </Text>
+          <Text style={[styles.sectionHint, { color: palette.quiet }]}>
+            Your public @handle, used for your profile URL. Cannot be changed.
+          </Text>
+          <View style={[styles.readonly, { borderColor: palette.rule }]}>
+            <Text style={[styles.readonlyText, { color: palette.ink2 }]} numberOfLines={1}>
+              @{profile.username}
+            </Text>
+          </View>
 
           {/* ------------------------------------------------- identity */}
           <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
@@ -657,6 +727,11 @@ const styles = StyleSheet.create({
     lineHeight: 31,
     letterSpacing: -0.5,
   },
+  handle: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 13,
+    marginTop: 2,
+  },
   email: { fontFamily: fontFamilies.sansRegular, fontSize: 12.5, marginTop: 4 },
   notice: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 18 },
   noticeText: { fontFamily: fontFamilies.sansRegular, fontSize: 12.5, lineHeight: 18 },
@@ -689,6 +764,16 @@ const styles = StyleSheet.create({
     marginTop: 7,
     fontFamily: fontFamilies.sansRegular,
     fontSize: 16,
+  },
+  bioInput: {
+    minHeight: 80,
+    paddingTop: 10,
+    textAlignVertical: "top",
+  },
+  fieldError: {
+    fontFamily: fontFamilies.sansRegular,
+    fontSize: 12.5,
+    marginTop: 6,
   },
   readonly: {
     borderWidth: 1,

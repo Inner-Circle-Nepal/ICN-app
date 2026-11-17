@@ -19,6 +19,9 @@ import { isClerkConfigured } from "@/constants/config";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
 import { ErrorState } from "@/components/ErrorState";
+import { useQueryClient } from "@tanstack/react-query";
+import { getMyProfile } from "@/lib/api/readerProfile";
+import { MY_PROFILE_KEY } from "@/features/profile/useMyProfile";
 
 /**
  * Reader sign-in, for Chautari.
@@ -63,9 +66,10 @@ function SignInUnavailable() {
 function SignInScreenActive() {
   const router = useRouter();
   const { palette } = useTheme();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, getToken } = useAuth();
   const { signIn, setActive: setSignInActive, isLoaded: signInLoaded } = useSignIn();
   const { signUp, setActive: setSignUpActive, isLoaded: signUpLoaded } = useSignUp();
+  const queryClient = useQueryClient();
 
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -80,6 +84,36 @@ function SignInScreenActive() {
   const back = () => {
     if (router.canGoBack()) router.back();
     else router.replace("/chautari");
+  };
+
+  /**
+   * Called after Clerk confirms a session is active. If the reader has no
+   * `reader_profiles` row yet (brand-new sign-up, or an existing account
+   * that pre-dates the profile system), route them to the mandatory
+   * completion gate instead of back into the app. Everyone else goes
+   * wherever they came from.
+   *
+   * Fetching through React Query (not a bare `getMyProfile`) seeds the
+   * cache so the layout's `useMyProfile` + the next screen read the same
+   * answer without a second request, and so the gate in `_layout.tsx`
+   * does not redirect-flicker us in the common case.
+   */
+  const afterSignIn = async () => {
+    try {
+      const profile = await queryClient.fetchQuery({
+        queryKey: MY_PROFILE_KEY,
+        queryFn: () => getMyProfile(getToken),
+      });
+      if (!profile) {
+        router.replace("/profile/complete");
+        return;
+      }
+    } catch {
+      // Treat a transient profile-fetch failure as "let the layout gate
+      // decide later": go back and let that pass through if the user
+      // already has a profile, or redirect to completion if not.
+    }
+    back();
   };
 
   /**
@@ -130,7 +164,7 @@ function SignInScreenActive() {
         }
         if (result.status === "complete") {
           await setSignUpActive!({ session: result.createdSessionId });
-          back();
+          await afterSignIn();
           return;
         }
         setError(
@@ -141,7 +175,7 @@ function SignInScreenActive() {
         const result = await signIn!.attemptFirstFactor({ strategy: "email_code", code: entered });
         if (result.status === "complete") {
           await setSignInActive!({ session: result.createdSessionId });
-          back();
+          await afterSignIn();
           return;
         }
       }

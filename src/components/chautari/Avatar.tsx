@@ -6,25 +6,22 @@ import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
 
 /**
- * A participant, drawn from the only thing the API gives us: their name.
- *
- * There is no avatar URL anywhere in the Chautari payloads — not in
- * `/api/chautari/discover`, not in the join grant, and no column for one in
- * `chautari_participants`. So this is initials set in the masthead serif on
- * the paper tone, which is a deliberate choice rather than a placeholder: it
- * needs no network, cannot pop in late, and looks the same on a cold start
- * as it does warm. Photographs are [needs API].
+ * A participant: their photograph when the room carries one, otherwise their
+ * initials set in the masthead serif on the paper tone. Initials need no
+ * network and cannot pop in late, so they are also what a slow or failed
+ * image load falls back to.
  *
  * The ring is the one piece of state it carries, and it is never decorative —
  * the caller passes `speaking` straight from LiveKit's own audio activity.
  */
 
-export type AvatarSize = "sm" | "md" | "lg";
+export type AvatarSize = "sm" | "md" | "lg" | "xl";
 
 const DIMENSIONS: Record<AvatarSize, { box: number; type: number }> = {
   sm: { box: 34, type: 14 },
   md: { box: 46, type: 18 },
   lg: { box: 58, type: 23 },
+  xl: { box: 72, type: 28 },
 };
 
 export function Avatar({
@@ -38,13 +35,8 @@ export function Avatar({
   /** LiveKit's own `isSpeaking`, already combined with "not muted". */
   speaking?: boolean;
   /**
-   * A real photograph, when one exists.
-   *
-   * Only the signed-in reader's own picture is available — Clerk exposes
-   * `imageUrl` for the current user and nothing equivalent for the other
-   * people in a room, so Chautari participants stay on initials until the
-   * backend carries avatars. Pass `null` rather than Clerk's generated
-   * placeholder: `user.hasImage` is the flag that distinguishes the two.
+   * A real photograph, when one exists. Pass `null` rather than Clerk's
+   * generated placeholder: `user.hasImage` distinguishes the two.
    */
   imageUrl?: string | null;
 }) {

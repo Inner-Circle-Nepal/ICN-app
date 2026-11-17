@@ -13,15 +13,20 @@ import {
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth, useUser } from "@clerk/clerk-expo";
-import Svg, { Path, Rect } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 
 import {
   ChautariError,
   endRoom,
+  getRoomDetails,
   moderate,
   setHandRaised,
+  startRoom,
   type ModerationAction,
 } from "@/lib/api/chautari";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Image } from "expo-image";
+import { WaitingRoom } from "@/components/chautari/WaitingRoom";
 import {
   END_MESSAGES,
   isBusy,
@@ -36,7 +41,11 @@ import { isClerkConfigured } from "@/constants/config";
 import { isLiveKitAvailable } from "@/lib/livekit/platform";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
-import { Avatar } from "@/components/chautari/Avatar";
+import { ListenerTile, SpeakerTile } from "@/components/chautari/RoomTiles";
+import { RoomControls } from "@/components/chautari/RoomControls";
+import { PersonSheet } from "@/components/chautari/PersonSheet";
+import { HandsSheet } from "@/components/chautari/HandsSheet";
+import { useMyProfile } from "@/features/profile/useMyProfile";
 import { ErrorState } from "@/components/ErrorState";
 
 /**
@@ -79,7 +88,7 @@ interface ListenerRow {
   member: RoomMember;
 }
 
-const LISTENER_COLUMNS = 5;
+const LISTENER_COLUMNS = 4;
 
 /** What the screen shows before the shared room exists: a join about to start. */
 const noop = () => {};
@@ -157,8 +166,9 @@ function ChautariRoomScreenActive() {
   const { isSignedIn, getToken } = useAuth();
   const { user } = useUser();
 
-  const displayName = user?.fullName?.trim() || user?.firstName?.trim() || null;
-  const localImageUrl = user?.hasImage ? user.imageUrl : null;
+  const { profile } = useMyProfile();
+  const displayName = profile?.display_name ?? null;
+  const localImageUrl = profile?.avatar_url ?? (user?.hasImage ? user.imageUrl : null);
 
   /*
    * The connection lives in ActiveRoomProvider, not here, so going Back keeps
@@ -170,11 +180,26 @@ function ChautariRoomScreenActive() {
   const room: ChautariRoomState =
     active?.slug === slug && sharedRoom ? sharedRoom : IDLE_ROOM;
 
-  const [handRaised, setHandRaisedState] = useState(false);
+  /*
+   * The hand follows the server: once the room carries it as an attribute,
+   * it survives a reconnect and comes down by itself when the host answers.
+   * `handFallback` covers a server that could not tell the room.
+   */
+  const [handFallback, setHandFallback] = useState<boolean | null>(null);
   const [handBusy, setHandBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const isHost = room.role === "host";
+  /*
+   * A moderator is appointed live, as a room attribute, so the reader's own
+   * member entry is the source; the join grant only knows about it after a
+   * reconnect. Display only: the server checks every action itself.
+   */
+  const localMember = room.members.find((m) => m.isLocal);
+  const isModerator = !isHost && (localMember?.isModerator ?? room.role === "moderator");
+  const canModerate = isHost || isModerator;
+  const myRole = isHost ? "host" : isModerator ? "moderator" : room.canPublish ? "speaker" : "listener";
+  const handRaised = handFallback ?? localMember?.handRaised ?? false;
   const title = room.identity?.title ?? hintedTitle ?? "Chautari";
 
   const getTokenRef = useRef(getToken);
@@ -184,10 +209,37 @@ function ChautariRoomScreenActive() {
 
   const [liveAudioSupported] = useState(isLiveKitAvailable);
 
+  /*
+   * The room's public details: banner, host, moderators, and whether it is
+   * live yet. A booked room shows its waiting room and is polled until
+   * someone starts it, at which point the screen joins by itself.
+   */
+  const queryClient = useQueryClient();
+  const alreadyHere = active?.slug === slug;
+  const details = useQuery({
+    queryKey: ["chautari-room", slug, Boolean(isSignedIn)],
+    queryFn: () => getRoomDetails(slug, isSignedIn ? getToken : undefined),
+    enabled: Boolean(slug),
+    retry: 1,
+    refetchInterval: (q) => (q.state.data?.room.status === "scheduled" ? 20_000 : false),
+  });
+  const roomDetails = details.data?.room ?? null;
+  const waiting = !alreadyHere && roomDetails?.status === "scheduled";
+  const lapsed = !alreadyHere && roomDetails?.status === "ended";
+  // Do not join until we know the room is live. An older server without the
+  // details endpoint errors here, and the join goes ahead as before.
+  const readyToJoin = alreadyHere || (!details.isLoading && !waiting && !lapsed);
+
   useEffect(() => {
-    if (!liveAudioSupported || !isSignedIn || !slug) return;
+    if (!liveAudioSupported || !isSignedIn || !slug || !readyToJoin) return;
     enter({ slug, hintedTitle, hintedHost });
-  }, [liveAudioSupported, isSignedIn, slug, hintedTitle, hintedHost, enter]);
+  }, [liveAudioSupported, isSignedIn, slug, hintedTitle, hintedHost, enter, readyToJoin]);
+
+  const [starting, setStarting] = useState(false);
+  const refreshRoom = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["chautari-room", slug] });
+    void queryClient.invalidateQueries({ queryKey: ["chautari-rooms"] });
+  }, [queryClient, slug]);
 
   const goBack = useCallback(() => {
     if (router.canGoBack()) router.back();
@@ -226,12 +278,12 @@ function ChautariRoomScreenActive() {
     setHandBusy(true);
     const next = !handRaised;
     try {
-      await setHandRaised(getTokenRef.current, {
+      const { visible } = await setHandRaised(getTokenRef.current, {
         roomSlug: slug,
         raised: next,
         displayName,
       });
-      setHandRaisedState(next);
+      setHandFallback(visible ? null : next);
       setNotice(next ? "Your hand is raised. The host will see it." : null);
     } catch (e) {
       setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
@@ -347,34 +399,57 @@ function ChautariRoomScreenActive() {
     [displayName, reporterEmail, slug],
   );
 
-  const openSafety = useCallback(
-    (member: RoomMember) => {
-      const isBlocked = blocked.has(member.identity);
-      Alert.alert(member.name, "Report this person to the newsroom, or block them.", [
-        {
-          text: "Report",
-          onPress: () =>
-            Alert.alert("Why are you reporting them?", undefined, [
-              { text: "Abusive or hateful", onPress: () => sendReport(member, "Abusive or hateful") },
-              { text: "Harassment", onPress: () => sendReport(member, "Harassment") },
-              { text: "Spam or scam", onPress: () => sendReport(member, "Spam or scam") },
-              { text: "Something else", onPress: () => sendReport(member, "Something else") },
-              { text: "Cancel", style: "cancel" },
-            ]),
-        },
-        {
-          text: isBlocked ? "Unblock" : "Block",
-          style: isBlocked ? "default" : "destructive",
-          onPress: () => toggleBlock(member),
-        },
-        { text: "Cancel", style: "cancel" },
-      ]);
+  /*
+   * Tap a person: their sheet. Host controls for the host; block and report
+   * for everyone (App Store guideline 1.2: every user must be able to).
+   *
+   * Only the identity is held, so the sheet always shows the live member —
+   * muted a moment ago, hand just raised — rather than a stale snapshot.
+   */
+  const [sheetIdentity, setSheetIdentity] = useState<string | null>(null);
+  const openMember = useCallback((member: RoomMember) => {
+    setSheetIdentity(member.identity);
+  }, []);
+  const sheetMember = sheetIdentity
+    ? (room.members.find((m) => m.identity === sheetIdentity) ?? null)
+    : null;
+
+  const viewProfile = useCallback(
+    (username: string) => {
+      // The room keeps running behind the mini bar while the profile is open.
+      router.push(`/user/${encodeURIComponent(username)}`);
     },
-    [blocked, sendReport, toggleBlock],
+    [router],
   );
 
+  const hands = useMemo(
+    () => room.members.filter((m) => m.handRaised && !m.canPublish && !m.isLocal),
+    [room.members],
+  );
+  const [handsOpen, setHandsOpen] = useState(false);
+
+  /*
+   * A moderator has two ways out: slip away, or end the room for everyone
+   * (they hold the host's controls). The host's own button always ends it.
+   */
+  const chooseLeave = useCallback(() => {
+    Alert.alert("Leave this room?", undefined, [
+      { text: "Leave quietly", onPress: leaveAndBack },
+      { text: "End room for everyone", style: "destructive", onPress: confirmEnd },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }, [leaveAndBack, confirmEnd]);
+
   const speakers = useMemo(
-    () => room.members.filter((m) => m.canPublish),
+    () =>
+      room.members
+        .filter((m) => m.canPublish)
+        // Host first, then moderators, then everyone else on stage.
+        .sort(
+          (a, b) =>
+            Number(b.isHost) * 2 + Number(b.isModerator) -
+            (Number(a.isHost) * 2 + Number(a.isModerator)),
+        ),
     [room.members],
   );
   const listenerRows = useMemo<ListenerRow[]>(
@@ -390,6 +465,76 @@ function ChautariRoomScreenActive() {
   const ticker = useOnAirTicker();
 
   /* ------------------------------------------------------------ gating */
+
+  if (waiting && roomDetails) {
+    const goLive = () => {
+      const startEarly =
+        roomDetails.scheduledFor &&
+        new Date(roomDetails.scheduledFor).getTime() - Date.now() > 15 * 60_000;
+      const run = () => {
+        setStarting(true);
+        void startRoom(getTokenRef.current, slug)
+          .then(refreshRoom)
+          .catch((e: unknown) =>
+            Alert.alert(
+              "Could not start the room",
+              e instanceof ChautariError ? e.message : "Please try again.",
+            ),
+          )
+          .finally(() => setStarting(false));
+      };
+      if (!startEarly) return run();
+      Alert.alert("Start early?", "The room is scheduled for later. Anyone waiting will be let in now.", [
+        { text: "Not yet", style: "cancel" },
+        { text: "Go live now", onPress: run },
+      ]);
+    };
+    const cancel = () =>
+      Alert.alert("Cancel this room?", "It comes off the schedule for everyone.", [
+        { text: "Keep it", style: "cancel" },
+        {
+          text: "Cancel room",
+          style: "destructive",
+          onPress: () => {
+            void endRoom(getTokenRef.current, slug)
+              .then(refreshRoom)
+              .then(() => router.replace("/chautari"))
+              .catch((e: unknown) =>
+                Alert.alert(
+                  "Could not cancel",
+                  e instanceof ChautariError ? e.message : "Please try again.",
+                ),
+              );
+          },
+        },
+      ]);
+
+    return (
+      <Shell onBack={goBack} onShare={share} title={roomDetails.title}>
+        <WaitingRoom
+          room={roomDetails}
+          canStart={Boolean(details.data?.canStart)}
+          starting={starting}
+          onGoLive={goLive}
+          onCancel={cancel}
+          onOpenProfile={viewProfile}
+          insetsBottom={insets.bottom}
+        />
+      </Shell>
+    );
+  }
+
+  if (lapsed) {
+    return (
+      <Shell onBack={goBack} onShare={null} title={title}>
+        <ErrorState
+          title="This room did not go ahead"
+          message="It was scheduled, but nobody started it, or it was cancelled."
+          onRetry={() => router.replace("/chautari")}
+        />
+      </Shell>
+    );
+  }
 
   if (!liveAudioSupported) {
     return (
@@ -472,6 +617,14 @@ function ChautariRoomScreenActive() {
         removeClippedSubviews
         ListHeaderComponent={
           <View>
+            {roomDetails?.bannerUrl ? (
+              <Image
+                source={{ uri: roomDetails.bannerUrl }}
+                style={styles.banner}
+                contentFit="cover"
+                transition={150}
+              />
+            ) : null}
             <Text style={[styles.headline, { color: palette.ink }]}>{title}</Text>
 
             {hintedHost || room.role ? (
@@ -489,7 +642,7 @@ function ChautariRoomScreenActive() {
                 {room.role ? (
                   <View style={[styles.rolePill, { borderColor: palette.rule2 }]}>
                     <Text style={[styles.rolePillText, { color: palette.quiet }]}>
-                      You · {room.role}
+                      You · {myRole}
                     </Text>
                   </View>
                 ) : null}
@@ -556,7 +709,7 @@ function ChautariRoomScreenActive() {
               <>
                 <SectionHeader
                   left={`On stage · ${speakers.length}`}
-                  right={isHost ? "Tap a speaker to manage" : undefined}
+                  right="Tap anyone for options"
                   palette={palette}
                 />
                 <View style={styles.stage}>
@@ -564,12 +717,9 @@ function ChautariRoomScreenActive() {
                     <SpeakerTile
                       key={m.identity}
                       member={m}
-                      isHost={isHost}
-                      onAct={confirmAct}
                       blocked={blocked.has(m.identity)}
-                      onSafety={openSafety}
                       localImageUrl={localImageUrl}
-                      palette={palette}
+                      onPress={openMember}
                     />
                   ))}
                 </View>
@@ -587,12 +737,9 @@ function ChautariRoomScreenActive() {
         renderItem={({ item }) => (
           <ListenerTile
             member={item.member}
-            isHost={isHost}
-            onAct={confirmAct}
             blocked={blocked.has(item.member.identity)}
-            onSafety={openSafety}
             localImageUrl={localImageUrl}
-            palette={palette}
+            onPress={openMember}
           />
         )}
         ListFooterComponent={
@@ -606,18 +753,40 @@ function ChautariRoomScreenActive() {
         }
       />
 
-      <Controls
+      <PersonSheet
+        member={sheetMember}
+        viewerCanModerate={canModerate}
+        blocked={sheetMember ? blocked.has(sheetMember.identity) : false}
+        localImageUrl={localImageUrl}
+        onClose={() => setSheetIdentity(null)}
+        onAct={confirmAct}
+        onToggleBlock={toggleBlock}
+        onReport={sendReport}
+        onViewProfile={viewProfile}
+      />
+
+      <HandsSheet
+        visible={handsOpen && canModerate}
+        hands={hands}
+        onClose={() => setHandsOpen(false)}
+        onAccept={(m) => confirmAct(m, "approve_speaker")}
+        onDecline={(m) => confirmAct(m, "deny_speaker")}
+      />
+
+      <RoomControls
         isHost={isHost}
+        canModerate={canModerate}
+        handsCount={hands.length}
+        onOpenHands={() => setHandsOpen(true)}
         canPublish={room.canPublish}
         micEnabled={room.micEnabled}
-        toggleMic={room.toggleMic}
+        onToggleMic={room.toggleMic}
         onEnd={confirmEnd}
-        onLeave={leaveAndBack}
+        onLeave={isModerator ? chooseLeave : leaveAndBack}
         handRaised={handRaised}
         handBusy={handBusy}
-        onToggleHand={toggleHand}
-        phase={room.phase}
-        palette={palette}
+        onToggleHand={() => void toggleHand()}
+        connected={room.phase === "connected"}
         insetsBottom={insets.bottom}
       />
     </Shell>
@@ -775,334 +944,6 @@ function SectionHeader({
   );
 }
 
-/* -------------------------------------------------------------- Speaker tile */
-
-const SpeakerTile = React.memo(function SpeakerTile({
-  member: p,
-  isHost,
-  onAct,
-  blocked,
-  onSafety,
-  localImageUrl,
-  palette,
-}: {
-  member: RoomMember;
-  isHost: boolean;
-  onAct: (member: RoomMember, action: ModerationAction) => void;
-  /** The reader has blocked this person and is not hearing them. */
-  blocked: boolean;
-  onSafety: (member: RoomMember) => void;
-  localImageUrl: string | null;
-  palette: ThemePalette;
-}) {
-  const speaking = p.isSpeaking && !p.isMuted && !blocked;
-  const label = blocked ? "Blocked" : stateLabel(p, speaking);
-  const roleTint =
-    speaking ? palette.red : p.isMuted ? palette.quiet : palette.ink2;
-
-  return (
-    <View
-      style={styles.speakerTile}
-      accessible={p.isLocal}
-      accessibilityLabel={`${p.name}${p.isLocal ? ", you" : ""}. ${label}.`}
-    >
-      <Avatar
-        name={p.name}
-        size="md"
-        speaking={speaking}
-        imageUrl={p.avatarUrl ?? (p.isLocal ? localImageUrl : null)}
-      />
-      <Text style={[styles.speakerName, { color: palette.ink }]} numberOfLines={1}>
-        {p.isLocal ? "You" : p.name}
-      </Text>
-      <View style={styles.speakerStateRow}>
-        {speaking ? (
-          <View style={[styles.speakingDot, { backgroundColor: palette.red }]} />
-        ) : null}
-        <Text style={[styles.speakerState, { color: roleTint }]}>{label}</Text>
-      </View>
-
-      {/* No controls on your own tile; host controls only for the host. */}
-      {!p.isLocal ? (
-        <View style={styles.speakerActions}>
-          {isHost ? (
-            <>
-              <HostAction label="Mute" onPress={() => onAct(p, "mute")} palette={palette} />
-              <HostAction
-                label="Demote"
-                onPress={() => onAct(p, "demote_speaker")}
-                palette={palette}
-              />
-              <HostAction
-                label="Remove"
-                danger
-                onPress={() => onAct(p, "remove")}
-                palette={palette}
-              />
-            </>
-          ) : null}
-          <HostAction label="Report / Block" onPress={() => onSafety(p)} palette={palette} />
-        </View>
-      ) : null}
-    </View>
-  );
-});
-
-/* -------------------------------------------------------------- Listener tile */
-
-const ListenerTile = React.memo(function ListenerTile({
-  member: p,
-  isHost,
-  onAct,
-  blocked,
-  onSafety,
-  localImageUrl,
-  palette,
-}: {
-  member: RoomMember;
-  isHost: boolean;
-  onAct: (member: RoomMember, action: ModerationAction) => void;
-  /** The reader has blocked this person and is not hearing them. */
-  blocked: boolean;
-  onSafety: (member: RoomMember) => void;
-  localImageUrl: string | null;
-  palette: ThemePalette;
-}) {
-  const inner = (
-    <View style={styles.listenerTile}>
-      <Avatar
-        name={p.name}
-        size="sm"
-        imageUrl={p.avatarUrl ?? (p.isLocal ? localImageUrl : null)}
-      />
-      <Text style={[styles.listenerName, { color: palette.ink2 }]} numberOfLines={1}>
-        {p.isLocal ? "You" : firstName(p.name)}
-      </Text>
-      {blocked ? (
-        <Text style={[styles.listenerName, { color: palette.quiet }]}>Blocked</Text>
-      ) : null}
-    </View>
-  );
-
-  if (p.isLocal) {
-    return (
-      <View
-        accessible
-        accessibilityLabel={`${p.name}${p.isLocal ? ", you" : ""}. Listening.`}
-      >
-        {inner}
-      </View>
-    );
-  }
-
-  /*
-   * Tap any other reader to report or block them (App Store guideline 1.2:
-   * every user must be able to). The host also gets their moderation
-   * actions here; long-press still works as before.
-   */
-  const openActions = () => {
-    if (!isHost) {
-      onSafety(p);
-      return;
-    }
-    Alert.alert(p.name, "Choose an action", [
-      { text: "Invite to stage", onPress: () => onAct(p, "approve_speaker") },
-      { text: "Remove", style: "destructive", onPress: () => onAct(p, "remove") },
-      { text: "Report or block", onPress: () => onSafety(p) },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  };
-
-  return (
-    <Pressable
-      onPress={openActions}
-      onLongPress={openActions}
-      accessibilityRole="button"
-      accessibilityLabel={`${p.name}.${blocked ? " Blocked." : ""} ${isHost ? "Host actions, report or block." : "Report or block."}`}
-    >
-      {inner}
-    </Pressable>
-  );
-});
-
-function firstName(full: string): string {
-  const i = full.indexOf(" ");
-  return i === -1 ? full : full.slice(0, i);
-}
-
-/* ------------------------------------------------------------- Host action */
-
-function HostAction({
-  label,
-  onPress,
-  danger = false,
-  palette,
-}: {
-  label: string;
-  onPress: () => void;
-  danger?: boolean;
-  palette: ThemePalette;
-}) {
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      hitSlop={{ top: 6, bottom: 6, left: 4, right: 4 }}
-      style={({ pressed }) => [styles.hostAction, pressed && styles.pressed]}
-    >
-      <Text style={[styles.hostActionText, { color: danger ? palette.red : palette.quiet }]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-/* ----------------------------------------------------------------- Controls */
-
-function Controls({
-  isHost,
-  canPublish,
-  micEnabled,
-  toggleMic,
-  onEnd,
-  onLeave,
-  handRaised,
-  handBusy,
-  onToggleHand,
-  phase,
-  palette,
-  insetsBottom,
-}: {
-  isHost: boolean;
-  canPublish: boolean;
-  micEnabled: boolean;
-  toggleMic: () => void;
-  onEnd: () => void;
-  onLeave: () => void;
-  handRaised: boolean;
-  handBusy: boolean;
-  onToggleHand: () => void;
-  phase: string;
-  palette: ThemePalette;
-  insetsBottom: number;
-}) {
-  return (
-    <View
-      style={[
-        styles.controls,
-        {
-          backgroundColor: palette.paper,
-          borderTopColor: palette.rule,
-          paddingBottom: Math.max(12, insetsBottom),
-        },
-      ]}
-    >
-      {isHost ? (
-        <Pressable
-          onPress={onEnd}
-          accessibilityRole="button"
-          accessibilityLabel="End this room for everyone"
-          style={({ pressed }) => [styles.leaveSlot, pressed && styles.pressed]}
-        >
-          <Text style={[styles.endText, { color: palette.red }]}>END ROOM</Text>
-        </Pressable>
-      ) : (
-        <Pressable
-          onPress={onLeave}
-          accessibilityRole="button"
-          accessibilityLabel="Leave this room"
-          style={({ pressed }) => [styles.leaveSlot, pressed && styles.pressed]}
-        >
-          <Text style={[styles.leaveText, { color: palette.quiet }]}>Leave</Text>
-        </Pressable>
-      )}
-
-      {canPublish ? (
-        <Pressable
-          onPress={toggleMic}
-          accessibilityRole="button"
-          accessibilityLabel={micEnabled ? "Mute your microphone" : "Unmute your microphone"}
-          accessibilityState={{ selected: micEnabled }}
-          style={({ pressed }) => [
-            styles.micBtn,
-            {
-              borderColor: palette.ink,
-              backgroundColor: micEnabled ? palette.ink : "transparent",
-            },
-            pressed && styles.pressed,
-          ]}
-        >
-          <Svg width={14} height={14} viewBox="0 0 24 24" fill="none">
-            <Rect
-              x={9}
-              y={3}
-              width={6}
-              height={11}
-              rx={3}
-              stroke={micEnabled ? palette.paper : palette.ink}
-              strokeWidth={1.7}
-            />
-            <Path
-              d="M5 11a7 7 0 0 0 14 0M12 18v3"
-              stroke={micEnabled ? palette.paper : palette.ink}
-              strokeWidth={1.7}
-              strokeLinecap="round"
-            />
-            {!micEnabled ? (
-              <Path
-                d="M4 4l16 16"
-                stroke={palette.ink}
-                strokeWidth={1.7}
-                strokeLinecap="round"
-              />
-            ) : null}
-          </Svg>
-          <Text
-            style={[
-              styles.micText,
-              { color: micEnabled ? palette.paper : palette.ink },
-            ]}
-          >
-            {micEnabled ? "LIVE · TAP TO MUTE" : "MUTED · TAP TO SPEAK"}
-          </Text>
-        </Pressable>
-      ) : (
-        <Pressable
-          onPress={() => void onToggleHand()}
-          disabled={handBusy || phase !== "connected"}
-          accessibilityRole="button"
-          accessibilityLabel={handRaised ? "Lower your hand" : "Raise your hand to speak"}
-          accessibilityState={{
-            selected: handRaised,
-            disabled: handBusy || phase !== "connected",
-          }}
-          style={({ pressed }) => [
-            styles.micBtn,
-            {
-              borderColor: palette.rule2,
-              backgroundColor: handRaised ? palette.paper2 : "transparent",
-            },
-            pressed && styles.pressed,
-          ]}
-        >
-          <Text style={[styles.micText, { color: palette.ink }]}>
-            {handBusy ? "…" : handRaised ? "HAND RAISED" : "RAISE HAND"}
-          </Text>
-        </Pressable>
-      )}
-    </View>
-  );
-}
-
-/* ------------------------------------------------------------------- helpers */
-
-function stateLabel(p: RoomMember, speaking: boolean): string {
-  if (!p.canPublish) return "Listening";
-  if (speaking) return "Speaking";
-  return p.isMuted ? "Muted" : "On stage";
-}
-
 /* ------------------------------------------------------------------- styles */
 
 const styles = StyleSheet.create({
@@ -1156,6 +997,13 @@ const styles = StyleSheet.create({
 
   body: { paddingHorizontal: spacing.gutter, paddingTop: 18, paddingBottom: 30 },
 
+  // Bleeds to the screen edges past the list's side padding.
+  banner: {
+    marginHorizontal: -spacing.gutter,
+    marginTop: -18,
+    marginBottom: 16,
+    aspectRatio: 16 / 9,
+  },
   headline: {
     fontFamily: fontFamilies.serifLight,
     fontSize: 26,
@@ -1219,116 +1067,16 @@ const styles = StyleSheet.create({
   stage: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 18,
-    marginTop: 14,
-  },
-  speakerTile: { width: 92, alignItems: "center" },
-  speakerName: {
-    fontFamily: fontFamilies.serifMedium,
-    fontSize: 13.5,
     marginTop: 8,
-    textAlign: "center",
   },
-  speakerStateRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 4,
-    marginTop: 3,
-  },
-  speakingDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-  },
-  speakerState: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 9.5,
-    letterSpacing: 0.9,
-    textTransform: "uppercase",
-    textAlign: "center",
-  },
-  speakerActions: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    justifyContent: "center",
-    gap: 6,
-    marginTop: 6,
-  },
-
   listenerCol: {
-    gap: 10,
-    marginTop: 12,
+    marginTop: 8,
   },
-  listenerTile: {
-    flex: 1,
-    alignItems: "center",
-    paddingVertical: 8,
-  },
-  listenerName: {
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 11,
-    marginTop: 4,
-    textAlign: "center",
-  },
-
-  hostAction: { minHeight: 32, paddingHorizontal: 2, justifyContent: "center" },
-  hostActionText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 10,
-    letterSpacing: 0.8,
-    textTransform: "uppercase",
-  },
-
   hint: {
     fontFamily: fontFamilies.sansRegular,
     fontSize: 12,
     lineHeight: 18,
     marginTop: 26,
-  },
-
-  controls: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: spacing.gutter,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    gap: 12,
-  },
-  leaveSlot: {
-    minHeight: 48,
-    paddingHorizontal: 6,
-    justifyContent: "center",
-  },
-  endText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11.5,
-    letterSpacing: 1.3,
-    textTransform: "uppercase",
-    textDecorationLine: "underline",
-  },
-  leaveText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11.5,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
-    textDecorationLine: "underline",
-  },
-  micBtn: {
-    flex: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    borderWidth: 1,
-    paddingHorizontal: 16,
-    minHeight: 48,
-  },
-  micText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
   },
 
   pressed: { opacity: 0.75 },

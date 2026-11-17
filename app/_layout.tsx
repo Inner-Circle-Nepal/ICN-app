@@ -41,6 +41,7 @@ import { MiniRoomBar } from "@/components/chautari/MiniRoomBar";
 import { ActiveRoomProvider } from "@/features/chautari/ActiveRoom";
 import { PushNudgeProvider } from "@/features/pushNudge/context";
 import { PushNudgeSheet } from "@/features/pushNudge/PushNudgeSheet";
+import { ProfileCompletionGate } from "@/features/profile/ProfileCompletionGate";
 import { extractNotificationPath, syncPushRegistration } from "@/lib/notifications/push";
 import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
 
@@ -181,6 +182,10 @@ function AppShell() {
             options={{ animation: "slide_from_bottom" }}
           />
           <Stack.Screen
+            name="chautari/mine"
+            options={{ animation: "slide_from_right" }}
+          />
+          <Stack.Screen
             name="chautari/earn"
             options={{ animation: "slide_from_right" }}
           />
@@ -195,6 +200,25 @@ function AppShell() {
           <Stack.Screen
             name="profile"
             options={{ animation: "slide_from_right" }}
+          />
+          <Stack.Screen
+            name="profile/complete"
+            options={{
+              /*
+               * Modal-style presentation underscores that this is a gate
+               * rather than a navigable screen, and matches the sign-in
+               * sheet so a fresh sign-up flows feel like one journey.
+               * `gestureEnabled: false` because the back-swipe must not
+               * dismiss a mandatory step — the route guard would just
+               * put them straight back.
+               */
+              animation: "slide_from_bottom",
+              gestureEnabled: false,
+            }}
+          />
+          <Stack.Screen
+            name="user/[username]"
+            options={{ animation: "slide_from_right", gestureEnabled: true }}
           />
           <Stack.Screen
             name="search"
@@ -227,6 +251,14 @@ function AppShell() {
       <MiniRoomBar />
       <BottomNav />
       <PushNudgeSheet />
+      {/*
+        Mounted here, inside the Clerk-wrapped tree (see the conditional
+        ClerkProvider below). `useMyProfile` calls `useAuth`, which throws
+        outside <ClerkProvider>, so the gate is intentionally absent in
+        builds without a Clerk key — those builds have no sign-up gate to
+        enforce in the first place.
+      */}
+      {isClerkConfigured ? <ProfileCompletionGate /> : null}
     </SafeAreaView>
   );
 }

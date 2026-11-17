@@ -2,9 +2,12 @@ import React, { useState } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { usePathname, useRouter } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import Svg, { Circle, Path } from "react-native-svg";
+import Svg, { Path } from "react-native-svg";
 import { useBookmarks } from "@/features/bookmarks/BookmarksContext";
 import { usePushNudge } from "@/features/pushNudge/context";
+import { useQuery } from "@tanstack/react-query";
+import { discoverRooms } from "@/lib/api/chautari";
+import { ChautariTabIcon } from "./ChautariTabIcon";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
 
@@ -26,6 +29,20 @@ export function BottomNav() {
   const { palette } = useTheme();
   const { bookmarks } = useBookmarks();
   const { showSettingsDot } = usePushNudge();
+
+  /*
+   * Is anything live in Chautari? Shares the lobby's query, so opening the
+   * tab costs no extra request and the two never disagree. A failed fetch
+   * just leaves the icon still.
+   */
+  const chautari = useQuery({
+    queryKey: ["chautari-rooms"],
+    queryFn: discoverRooms,
+    staleTime: 30 * 1000,
+    refetchInterval: 90 * 1000,
+    retry: 0,
+  });
+  const liveRooms = (chautari.data ?? []).filter((r) => r.status === "live").length;
 
   /*
    * Optimistic active tab.
@@ -107,6 +124,7 @@ export function BottomNav() {
     {
       key: "chautari",
       label: "Chautari",
+      a11yLabel: liveRooms > 0 ? `Chautari, ${liveRooms} live` : undefined,
       href: "/chautari" as const,
       active: activeHref === "/chautari",
       /*
@@ -115,22 +133,7 @@ export function BottomNav() {
        * the ink colour and the 1.6 stroke every other tab uses.
        */
       icon: (color: string) => (
-        <Svg width={ICON} height={ICON} viewBox="0 0 24 24" fill="none">
-          <Circle cx={12} cy={12} r={2.5} stroke={color} strokeWidth={1.7} />
-          <Path
-            d="M7.5 8.5a6 6 0 0 0 0 7M16.5 8.5a6 6 0 0 1 0 7"
-            stroke={color}
-            strokeWidth={1.7}
-            strokeLinecap="round"
-          />
-          <Path
-            d="M4.5 5.5a10 10 0 0 0 0 13M19.5 5.5a10 10 0 0 1 0 13"
-            stroke={color}
-            strokeWidth={1.4}
-            strokeLinecap="round"
-            opacity={0.55}
-          />
-        </Svg>
+        <ChautariTabIcon color={color} liveColor={palette.red} live={liveRooms > 0} />
       ),
     },
     {
@@ -206,7 +209,7 @@ export function BottomNav() {
             }}
             accessibilityRole="tab"
             accessibilityState={{ selected: tab.active }}
-            accessibilityLabel={tab.label}
+            accessibilityLabel={("a11yLabel" in tab && tab.a11yLabel) || tab.label}
             style={styles.tabItem}
           >
             <View style={styles.iconWrap}>

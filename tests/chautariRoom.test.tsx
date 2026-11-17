@@ -33,6 +33,8 @@ interface FakeParticipant {
   audioTrackPublications: Map<string, { isMuted: boolean }>;
   isMicrophoneEnabled: boolean;
   setMicrophoneEnabled: (on: boolean) => Promise<void>;
+  metadata?: string;
+  attributes?: Record<string, string>;
 }
 
 /*
@@ -106,6 +108,8 @@ const h = vi.hoisted(() => {
       LocalTrackPublished: "localTrackPublished",
       LocalTrackUnpublished: "localTrackUnpublished",
       ParticipantPermissionsChanged: "participantPermissionsChanged",
+      ParticipantMetadataChanged: "participantMetadataChanged",
+      ParticipantAttributesChanged: "participantAttributesChanged",
       Reconnecting: "reconnecting",
       Reconnected: "reconnected",
       Disconnected: "disconnected",
@@ -794,6 +798,83 @@ describe("participants", () => {
     pub.isDesired = false;
     await act(async () => state().setBlocked(new Set()));
     expect(pub.setSubscribed).toHaveBeenLastCalledWith(true);
+    await unmount();
+  });
+
+  it("reads username, avatar and the host flag from the server's metadata", async () => {
+    const room = await connectedRoom();
+    room.remoteParticipants.set(
+      "a",
+      participant({
+        identity: "a",
+        metadata: JSON.stringify({
+          username: "asha_k",
+          avatar: "https://img.clerk.com/a",
+          host: true,
+        }),
+      }),
+    );
+    room.remoteParticipants.set("b", participant({ identity: "b" }));
+    await act(async () => room.emit(RoomEvent.ParticipantConnected));
+
+    const asha = state().members.find((m) => m.identity === "a")!;
+    expect(asha.username).toBe("asha_k");
+    expect(asha.avatarUrl).toBe("https://img.clerk.com/a");
+    expect(asha.isHost).toBe(true);
+
+    const bikash = state().members.find((m) => m.identity === "b")!;
+    expect(bikash.username).toBeNull();
+    expect(bikash.isHost).toBe(false);
+    await unmount();
+  });
+
+  it("ignores metadata that is not what the server writes", async () => {
+    const room = await connectedRoom();
+    room.remoteParticipants.set(
+      "a",
+      participant({
+        identity: "a",
+        metadata: JSON.stringify({ username: "Not A Handle!", avatar: "file:///x", host: "yes" }),
+      }),
+    );
+    room.remoteParticipants.set("b", participant({ identity: "b", metadata: "{not json" }));
+    await act(async () => room.emit(RoomEvent.ParticipantConnected));
+
+    for (const m of state().members.filter((x) => !x.isLocal)) {
+      expect(m.username).toBeNull();
+      expect(m.avatarUrl).toBeNull();
+      expect(m.isHost).toBe(false);
+    }
+    await unmount();
+  });
+
+  it("shows a raised hand, and takes it down when the attribute is cleared", async () => {
+    const room = await connectedRoom();
+    const asha = participant({ identity: "a" });
+    room.remoteParticipants.set("a", asha);
+    await act(async () => room.emit(RoomEvent.ParticipantConnected));
+    expect(state().members.find((m) => m.identity === "a")!.handRaised).toBe(false);
+
+    asha.attributes = { hand: "1" };
+    await act(async () => room.emit(RoomEvent.ParticipantAttributesChanged));
+    expect(state().members.find((m) => m.identity === "a")!.handRaised).toBe(true);
+
+    asha.attributes = {};
+    await act(async () => room.emit(RoomEvent.ParticipantAttributesChanged));
+    expect(state().members.find((m) => m.identity === "a")!.handRaised).toBe(false);
+    await unmount();
+  });
+
+  it("marks a moderator the moment the room appoints them", async () => {
+    const room = await connectedRoom();
+    const asha = participant({ identity: "a", permissions: { canPublish: true } });
+    room.remoteParticipants.set("a", asha);
+    await act(async () => room.emit(RoomEvent.ParticipantConnected));
+    expect(state().members.find((m) => m.identity === "a")!.isModerator).toBe(false);
+
+    asha.attributes = { mod: "1" };
+    await act(async () => room.emit(RoomEvent.ParticipantAttributesChanged));
+    expect(state().members.find((m) => m.identity === "a")!.isModerator).toBe(true);
     await unmount();
   });
 

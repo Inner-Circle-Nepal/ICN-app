@@ -156,6 +156,15 @@ describe("request shapes", () => {
     });
   });
 
+  it("reports whether the room was told about the hand", async () => {
+    fetchMock.mockResolvedValue(reply({ ok: true, raised: true, visible: true }));
+    expect(await setHandRaised(token, { roomSlug: "r", raised: true })).toEqual({ visible: true });
+
+    // An older server says nothing; the app must not assume the room knows.
+    fetchMock.mockResolvedValue(reply({ ok: true, raised: true }));
+    expect(await setHandRaised(token, { roomSlug: "r", raised: true })).toEqual({ visible: false });
+  });
+
   it("sends a moderation action with its target", async () => {
     fetchMock.mockResolvedValue(reply({ ok: true, role: "speaker", applied: true }));
     const res = await moderate(token, {
