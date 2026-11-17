@@ -11,6 +11,12 @@
 // Dedupe: `reminder_push_log.sent_on` is a date PK, so a second firing
 // on the same NPT day fails the claim insert and the function exits.
 //
+// Not spammy: a phone is skipped when the app was opened there in the last
+// QUIET_IF_SEEN_DAYS (`last_seen_at`), or it was reminded in the last
+// MIN_GAP_DAYS (`last_reminded_at`). Active readers in practice never get
+// one; a lapsed reader gets at most about two a week. A new reminder also
+// replaces an unread old one in the tray rather than stacking.
+//
 // Secrets:
 //   WEBHOOK_SECRET      shared with the cron job's `x-webhook-secret` header
 //   EXPO_ACCESS_TOKEN   optional
@@ -21,6 +27,9 @@ type TokenRow = { token: string };
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 const BATCH = 100;
+const QUIET_IF_SEEN_DAYS = 3;
+const MIN_GAP_DAYS = 4;
+const DAY_MS = 86_400_000;
 
 // Nepali-flavored bilingual pool. Rotates by day-of-year; a given device
 // sees the same message on the same calendar day.
@@ -71,10 +80,15 @@ Deno.serve(async (req) => {
 
   const tokens: TokenRow[] = [];
   for (let from = 0; ; from += 1000) {
+    const seenCutoff = new Date(Date.now() - QUIET_IF_SEEN_DAYS * DAY_MS).toISOString();
+    const remindedCutoff = new Date(Date.now() - MIN_GAP_DAYS * DAY_MS).toISOString();
     const { data, error } = await sb
       .from("mobile_push_tokens")
       .select("token")
       .eq("reminders_enabled", true)
+      .lt("last_seen_at", seenCutoff)
+      .or(`last_reminded_at.is.null,last_reminded_at.lt.${remindedCutoff}`)
+      .order("token")
       .range(from, from + 999);
     if (error) return json({ error: error.message }, 500);
     tokens.push(...(data ?? []));
@@ -86,10 +100,16 @@ Deno.serve(async (req) => {
   const messages = tokens.map(({ token }) => ({
     to: token,
     title,
+    subtitle: "Inner Circle Nepal",
     body,
     sound: "default",
     priority: "normal" as const,
     channelId: "reminders",
+    // Replace an unread earlier reminder instead of piling up (Android: tag,
+    // iOS: collapseId). A morning nudge is stale by evening.
+    tag: "reminder",
+    collapseId: "reminder",
+    ttl: 12 * 3600,
     data: { tag: "reminder" },
   }));
 
@@ -102,6 +122,7 @@ Deno.serve(async (req) => {
 
   let sent = 0;
   const dead: string[] = [];
+  const reminded: string[] = [];
 
   for (let i = 0; i < messages.length; i += BATCH) {
     const batch = messages.slice(i, i + BATCH);
@@ -115,12 +136,23 @@ Deno.serve(async (req) => {
       data: { status: "ok" | "error"; details?: { error?: string } }[];
     };
     tickets.forEach((t, j) => {
-      if (t.status === "ok") sent += 1;
-      else if (t.details?.error === "DeviceNotRegistered") dead.push(batch[j].to);
+      if (t.status === "ok") {
+        sent += 1;
+        reminded.push(batch[j].to);
+      } else if (t.details?.error === "DeviceNotRegistered") dead.push(batch[j].to);
     });
   }
 
   if (dead.length) await sb.from("mobile_push_tokens").delete().in("token", dead);
+
+  // Start each reminded phone's quiet gap.
+  const remindedAt = new Date().toISOString();
+  for (let i = 0; i < reminded.length; i += 200) {
+    await sb
+      .from("mobile_push_tokens")
+      .update({ last_reminded_at: remindedAt })
+      .in("token", reminded.slice(i, i + 200));
+  }
 
   await sb
     .from("reminder_push_log")

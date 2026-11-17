@@ -3,6 +3,7 @@ import {
   ChautariError,
   discoverRooms,
   endRoom,
+  inviteToRoom,
   moderate,
   openRoom,
   requestJoin,
@@ -188,5 +189,43 @@ describe("request shapes", () => {
 
     expect(String(fetchMock.mock.calls[0][0])).toContain("slug=budget%20debate");
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe("DELETE");
+  });
+});
+
+describe("invitations", () => {
+  it("send the room and handles with the session, and read who was reached", async () => {
+    fetchMock.mockResolvedValue(
+      reply({ ok: true, invited: ["asha"], alreadyInvited: [], notReachable: ["ram"] }),
+    );
+    const res = await inviteToRoom(token, "budget-debate", ["asha", "ram"]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/chautari\/invite$/);
+    expect(JSON.parse(String(init.body))).toEqual({
+      slug: "budget-debate",
+      usernames: ["asha", "ram"],
+    });
+    expect((init.headers as Record<string, string>).authorization).toBe(
+      "Bearer clerk_session_token_abc",
+    );
+    expect(res).toEqual({ invited: ["asha"], alreadyInvited: [], notReachable: ["ram"] });
+  });
+
+  it("tolerate a reply missing lists", async () => {
+    fetchMock.mockResolvedValue(reply({ ok: true }));
+    expect(await inviteToRoom(token, "r", ["asha"])).toEqual({
+      invited: [],
+      alreadyInvited: [],
+      notReachable: [],
+    });
+  });
+
+  it("surface the server's reason when the caller may not invite", async () => {
+    fetchMock.mockResolvedValue(
+      reply({ ok: false, error: "Only the host or a moderator…", reason: "not_host" }, 403),
+    );
+    await expect(inviteToRoom(token, "r", ["asha"])).rejects.toMatchObject({
+      reason: "not_host",
+      status: 403,
+    });
   });
 });

@@ -41,6 +41,8 @@ export type UsernameCheck =
 
 export type FollowStatus = {
   is_following: boolean;
+  /** The viewer asked to hear about this reader's Chautari rooms. */
+  notify?: boolean;
   follower_count: number;
   is_self: boolean;
 };
@@ -244,4 +246,44 @@ export async function unfollowUser(
   );
   if (!res) throw new ReaderApiError("server_error", "No response.", 0);
   return res;
+}
+
+/** Hear about this reader's Chautari rooms (they went live, they invited you), or not. */
+export async function setFollowNotify(
+  getToken: GetToken,
+  username: string,
+  notify: boolean,
+): Promise<void> {
+  await call<{ notify: boolean }>(
+    `/api/reader/follows/${encodeURIComponent(username)}`,
+    { method: "PATCH", body: JSON.stringify({ notify }) },
+    { getToken },
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Push: which reader this phone belongs to                                   */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Tie this phone's push token to the signed-in reader, so alerts about the
+ * people they follow can reach it. `linked: false` means the token is not
+ * registered yet; the next registration links it again.
+ */
+export async function linkPushToken(getToken: GetToken, token: string): Promise<boolean> {
+  const res = await call<{ linked: boolean }>(
+    "/api/reader/push-token",
+    { method: "POST", body: JSON.stringify({ token }) },
+    { getToken },
+  );
+  return res?.linked ?? false;
+}
+
+/** Called before signing out: this phone stops getting that reader's alerts. */
+export async function unlinkPushToken(getToken: GetToken, token: string): Promise<void> {
+  await call<{ linked: boolean }>(
+    "/api/reader/push-token",
+    { method: "DELETE", body: JSON.stringify({ token }) },
+    { getToken },
+  );
 }

@@ -72,7 +72,10 @@
       [
         "expo-notifications",
         {
-          "color": "#db0a12"
+          "icon": "./assets/notification-icon.png",
+          "largeIcon": "./assets/notification-large-icon.png",
+          "color": "#db0a12",
+          "defaultChannel": "breaking-news"
         }
       ],
       [

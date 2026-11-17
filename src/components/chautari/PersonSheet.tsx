@@ -14,6 +14,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
 import { Avatar } from "./Avatar";
 import { BottomSheet } from "./BottomSheet";
+import { FollowAlertPrompt } from "@/components/FollowAlertPrompt";
 
 /**
  * Everything you can do about one person in a Chautari room.
@@ -63,6 +64,8 @@ export function PersonSheet({
 }) {
   const { palette } = useTheme();
   const [reporting, setReporting] = useState(false);
+  // Right after following: ask about their Chautari rooms, in this sheet.
+  const [askingAlerts, setAskingAlerts] = useState(false);
 
   const username = member?.username ?? undefined;
   const profileQuery = useProfile(username);
@@ -74,6 +77,7 @@ export function PersonSheet({
 
   const close = () => {
     setReporting(false);
+    setAskingAlerts(false);
     onClose();
   };
   // Every action closes the sheet first, so a confirm dialog or a navigation
@@ -137,7 +141,13 @@ export function PersonSheet({
 
   return (
     <BottomSheet visible onClose={close}>
-        {reporting ? (
+        {askingAlerts && member.username ? (
+          <FollowAlertPrompt
+            name={member.name}
+            username={member.username}
+            onDone={() => setAskingAlerts(false)}
+          />
+        ) : reporting ? (
           <>
             <Text style={[styles.kicker, { color: palette.quiet }]}>Report {member.name}</Text>
             <Text style={[styles.reportTitle, { color: palette.ink }]}>
@@ -196,7 +206,12 @@ export function PersonSheet({
                     onPress={() => {
                       void Haptics.selectionAsync().catch(() => {});
                       if (following) unfollow.mutate(member.username!);
-                      else follow.mutate(member.username!);
+                      else
+                        follow.mutate(member.username!, {
+                          onSuccess: (res) => {
+                            if (!res.already_following) setAskingAlerts(true);
+                          },
+                        });
                     }}
                     disabled={followBusy || !status}
                     accessibilityRole="button"

@@ -5,16 +5,14 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 
 import { ChautariError, uploadBanner, type GetToken } from "@/lib/api/chautari";
-import { getProfileByUsername } from "@/lib/api/readerProfile";
+import { UserSearchField } from "@/components/UserSearchField";
 import { profileImageDataUri } from "@/features/profile/photo";
-import { validateUsername } from "@/features/profile/validators";
 import { bookingDays, bookingSlots, formatBooking } from "@/features/chautari/schedule";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
@@ -262,43 +260,10 @@ export function ModeratorsField({
   disabled: boolean;
 }) {
   const { palette } = useTheme();
-  const [draft, setDraft] = useState("");
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const full = value.length >= MAX_MODERATORS;
-
-  const add = async () => {
-    const handle = draft.trim().replace(/^@/, "").toLowerCase();
-    setError(null);
-    const check = validateUsername(handle);
-    if (!check.ok) {
-      setError(check.message);
-      return;
-    }
-    if (handle === ownUsername) {
-      setError("You're the host already.");
-      return;
-    }
-    if (value.some((m) => m.username === handle)) {
-      setError(`@${handle} is already on the list.`);
-      return;
-    }
-    setChecking(true);
-    try {
-      const profile = await getProfileByUsername(handle);
-      if (!profile) {
-        setError(`No reader goes by @${handle}.`);
-        return;
-      }
-      onChange([...value, { username: profile.username, name: profile.display_name }]);
-      setDraft("");
-    } catch {
-      setError("Could not check that username. Try again.");
-    } finally {
-      setChecking(false);
-    }
-  };
+  // The host is never offered, nor anyone already on the list.
+  const exclude = [...(ownUsername ? [ownUsername] : []), ...value.map((m) => m.username)];
 
   return (
     <View>
@@ -324,39 +289,14 @@ export function ModeratorsField({
 
       {!full ? (
         <View style={styles.modInputRow}>
-          <TextInput
-            value={draft}
-            onChangeText={(t) => setDraft(t.toLowerCase())}
-            placeholder="@username"
-            placeholderTextColor={palette.quiet}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!disabled && !checking}
-            onSubmitEditing={() => void add()}
-            returnKeyType="done"
-            accessibilityLabel="Moderator's username"
-            style={[styles.modInput, { borderColor: palette.rule2, color: palette.ink }]}
+          <UserSearchField
+            onPick={(p) => onChange([...value, { username: p.username, name: p.display_name }])}
+            exclude={exclude}
+            disabled={disabled}
+            accessibilityLabel="Find a moderator by username or name"
           />
-          <Pressable
-            onPress={() => void add()}
-            disabled={disabled || checking || draft.trim().length === 0}
-            accessibilityRole="button"
-            accessibilityLabel="Add moderator"
-            style={({ pressed }) => [
-              styles.modAdd,
-              { borderColor: palette.ink },
-              (pressed || checking) && styles.pressed,
-            ]}
-          >
-            {checking ? (
-              <ActivityIndicator size="small" color={palette.ink} />
-            ) : (
-              <Text style={[styles.segmentText, { color: palette.ink }]}>Add</Text>
-            )}
-          </Pressable>
         </View>
       ) : null}
-      {error ? <Text style={[styles.error, { color: palette.red }]}>{error}</Text> : null}
     </View>
   );
 }
@@ -415,15 +355,6 @@ const styles = StyleSheet.create({
   modWho: { flex: 1, minWidth: 0 },
   modName: { fontFamily: fontFamilies.serifMedium, fontSize: 15.5 },
   modHandle: { fontFamily: fontFamilies.sansRegular, fontSize: 12, marginTop: 1 },
-  modInputRow: { flexDirection: "row", gap: 8, marginTop: 10 },
-  modInput: {
-    flex: 1,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    minHeight: 46,
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 15,
-  },
-  modAdd: { minWidth: 72, borderWidth: 1, alignItems: "center", justifyContent: "center" },
+  modInputRow: { marginTop: 10 },
   pressed: { opacity: 0.7 },
 });

@@ -219,6 +219,36 @@ export async function getRoomDetails(
   );
 }
 
+export type InviteResult = {
+  /** Newly invited: they get a notification. */
+  invited: string[];
+  /** Invited to this room before; nothing sent again. */
+  alreadyInvited: string[];
+  /** Not reached: they don't follow you with alerts on (or no such reader). */
+  notReachable: string[];
+};
+
+/**
+ * Invite readers to a room by @handle. Host or an assigned moderator only;
+ * reaches only people who follow the caller with Chautari alerts on.
+ */
+export async function inviteToRoom(
+  getToken: GetToken,
+  slug: string,
+  usernames: string[],
+): Promise<InviteResult> {
+  const res = await call<Partial<InviteResult>>(
+    "/api/chautari/invite",
+    { method: "POST", body: JSON.stringify({ slug, usernames }) },
+    getToken,
+  );
+  return {
+    invited: res.invited ?? [],
+    alreadyInvited: res.alreadyInvited ?? [],
+    notReachable: res.notReachable ?? [],
+  };
+}
+
 /** Rooms the reader hosts or moderates, live or booked. */
 export async function getMyRooms(getToken: GetToken): Promise<MyRoom[]> {
   const res = await call<{ rooms: MyRoom[] }>("/api/chautari/rooms/mine", { method: "GET" }, getToken);

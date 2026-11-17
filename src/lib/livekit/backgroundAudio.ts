@@ -30,56 +30,23 @@ function native(): NativeAudioService | null {
   return cached;
 }
 
-let askedForNotifications = false;
-
 /**
- * Android 13+ hides every notification, the service's included, until the
- * reader allows notifications. The audio keeps going without it, but the
- * reader cannot see or tap the ongoing "Listening in Chautari" card. Ask once
- * per app session, when they first join a room, and report whether it is
- * allowed now.
+ * Show the ongoing notification and keep audio alive. Safe to call again to
+ * update it.
+ *
+ * Never asks for notification permission. On Android 13+ the ongoing card
+ * stays hidden until notifications are allowed, but the service, and so the
+ * audio, runs either way. Joining a room used to ask here; that spent one of
+ * Android's two permission prompts on something the reader did not ask for,
+ * before the prompt that matters ("Notify me" after a follow, or Settings).
+ * Once permission exists for those reasons, the card simply appears.
  */
-async function allowNotifications(): Promise<boolean> {
-  if (Platform.OS !== "android" || Number(Platform.Version) < 33) return false;
-  if (askedForNotifications) return false;
-  askedForNotifications = true;
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { notificationsModule } = require("@/lib/notifications/module") as typeof import("@/lib/notifications/module");
-    const N = notificationsModule();
-    if (!N) return false;
-    const current = await N.getPermissionsAsync();
-    if (current.granted) return false;
-    if (!current.canAskAgain) return false;
-    // Android shows the prompt only once a channel exists; same id as the service's.
-    await N.setNotificationChannelAsync("chautari-live-audio", {
-      name: "Chautari live audio",
-      description: "Shown while you are in a Chautari conversation",
-      importance: N.AndroidImportance.LOW,
-      showBadge: false,
-    });
-    const requested = await N.requestPermissionsAsync();
-    return requested.granted;
-  } catch {
-    return false;
-  }
-}
-
-/** Show the ongoing notification and keep audio alive. Safe to call again to update it. */
 export function startBackgroundAudio(title: string, speaking: boolean): void {
-  const start = () => {
-    try {
-      native()?.start(title, speaking);
-    } catch {
-      /* Refused by the OS; the room still works while the app is open. */
-    }
-  };
-  if (!native()) return;
-  start();
-  // Once allowed, start again so the notification is posted where it can be seen.
-  void allowNotifications().then((nowAllowed) => {
-    if (nowAllowed) start();
-  });
+  try {
+    native()?.start(title, speaking);
+  } catch {
+    /* Refused by the OS; the room still works while the app is open. */
+  }
 }
 
 export function stopBackgroundAudio(): void {

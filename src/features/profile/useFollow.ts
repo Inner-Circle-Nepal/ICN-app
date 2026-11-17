@@ -5,8 +5,10 @@ import {
   type FollowStatus,
   followUser,
   getFollowStatus,
+  setFollowNotify,
   unfollowUser,
 } from "@/lib/api/readerProfile";
+import { enableChautariPush, getChautariPushState } from "@/lib/notifications/push";
 
 /**
  * Follow relationship and follower count for another reader's profile.
@@ -96,6 +98,7 @@ export function useUnfollowMutation() {
             ? {
                 ...prev,
                 is_following: false,
+                notify: false,
                 follower_count: prev.is_following
                   ? Math.max(0, prev.follower_count - 1)
                   : prev.follower_count,
@@ -110,6 +113,50 @@ export function useUnfollowMutation() {
       }
     },
     onSettled: (_data, _err, username) => {
+      void qc.invalidateQueries({ queryKey: followStatusKey(username) });
+    },
+  });
+}
+
+/**
+ * Chautari alerts about one person you follow, on or off.
+ *
+ * Turning them on also turns on Chautari alerts for the phone if they are
+ * off, which is the moment the OS permission prompt appears for a reader who
+ * has never allowed notifications: only after they said yes to this person.
+ * Resolves to a note to show when the phone itself will not deliver them.
+ */
+export function useFollowNotifyMutation() {
+  const { getToken } = useAuth();
+  const qc = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({ username, notify }: { username: string; notify: boolean }) => {
+      await setFollowNotify(getToken, username, notify);
+      if (!notify) return { phoneNote: null };
+      if ((await getChautariPushState()).enabled) return { phoneNote: null };
+      const phone = await enableChautariPush();
+      return {
+        phoneNote: phone.enabled
+          ? phone.statusNote
+          : (phone.statusNote ??
+            "Saved, but this phone is not allowed to show notifications. Allow them in your phone's settings."),
+      };
+    },
+    onMutate: async ({ username, notify }) => {
+      await qc.cancelQueries({ queryKey: followStatusKey(username) });
+      const previous = qc.getQueryData<FollowStatus | null>(followStatusKey(username));
+      qc.setQueryData<FollowStatus | null | undefined>(followStatusKey(username), (prev) =>
+        prev ? { ...prev, notify } : prev,
+      );
+      return { previous };
+    },
+    onError: (_err, { username }, ctx) => {
+      if (ctx?.previous !== undefined) {
+        qc.setQueryData(followStatusKey(username), ctx.previous);
+      }
+    },
+    onSettled: (_data, _err, { username }) => {
       void qc.invalidateQueries({ queryKey: followStatusKey(username) });
     },
   });

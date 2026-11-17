@@ -97,7 +97,9 @@ Behaviour that spans the site repo, Supabase and the app. Change both sides toge
 | NEPSE | YoNEPSE's public JSON on GitHub (raw + Pages mirror); not our backend | `nepse.ts` |
 | Newsletter signup, contact desk | Site `POST /api/newsletter`, `POST /api/contact`, falling back to direct inserts into `subscribers` / `contact_messages` | `newsletter.ts` |
 | Push tokens and per-type opt-ins | Supabase RPCs | `pushRegistry.ts` |
+| Which reader a phone's push token belongs to | Site `POST`/`DELETE /api/reader/push-token` (Clerk bearer) | `readerProfile.ts`, `PushAccountLink.tsx` |
 | Reader profiles, follows | Site `/api/reader/*` (Clerk bearer) | `readerProfile.ts` |
+| People search, @handle dropdowns | Supabase RPC `search_reader_profiles` (anon key; `supabase/migrations/20261118_reader_profile_search.sql`) | `readerSearch.ts` |
 | Chautari | Site `/api/chautari/*` at `CHAUTARI_API_URL` (Clerk bearer) | `chautari.ts` |
 
 Site routes the app does **not** use (web or staff only): `ads/*`, `cron/*` (digest, forex, timesheets; guarded by `CRON_SECRET`), `edition`, `market/nepse`, `newsletter/unsubscribe`, `push/subscribe` (Web Push for browsers), `reader/newsletter`, `reader/preferences` (edition stored in Clerk `publicMetadata`), `search`, `track`, and everything under `/admin`.
@@ -116,6 +118,7 @@ Tables (`site/supabase/2026-10-chautari.sql`, plus the moderators and scheduling
 - **Who may host**: `CHAUTARI_HOSTING` on the site is `open` (default: any signed-in account unless a revoked entitlement row bars them) or `invite` (only accounts with an unrevoked entitlement row). Fails closed if the table can't be read. Refusal is `not_entitled_to_host` (403).
 - **Joining** (`POST /token`): verify Clerk session → load room → read the stored role → enforce capacity and removal → mint a short-lived token whose grants come from the role. Refusals carry a `reason` the app branches on: `not_signed_in`, `room_not_found`, `room_ended`, `room_full`, `removed_from_room`, `not_entitled_to_host`, `room_not_started`. Moderation refusals: `not_host`, `room_ended`, `target_is_host`, `target_is_self`, `target_not_in_room`.
 - **Presence** (`POST /webhook`, called by LiveKit, signature-verified): `participant_joined` / `participant_left` set `left_at` and counts; `room_finished` ends the room. Handlers set values rather than toggle, because events repeat and arrive out of order. This is what clears readers who force-quit or lose signal.
+- **Invites** (`POST /invite` `{ slug, usernames }`, up to 10): host or assigned moderator (`decideInvite`), room booked-and-unexpired or live. Only readers who follow the caller with `notify` on are invited; the reply lists `invited`, `alreadyInvited`, `notReachable`. One row per person per room in `chautari_invites` (`site/supabase/2026-11-chautari-invites.sql`); its INSERT webhook fires `send-chautari-invite-push`. Rate limited per inviter.
 - **Report and block** have no Chautari endpoint. Report sends a `Chautari report` message through the contact desk (`/api/contact`). Block is on-device only (`src/lib/storage/chautariBlocks.ts`): it silences that person's audio locally.
 - **Roles** live in `chautari_participants.role`: `host`, `moderator`, `speaker`, `listener`. The host is also recognised from `chautari_rooms.host_clerk_id`. Host, moderator and speaker get `canPublish`.
 - **Moderation** (`POST /api/chautari/moderate`, actions `approve_speaker`, `deny_speaker`, `demote_speaker`, `mute`, `remove`, `make_moderator`, `remove_moderator`): allowed for the host or a moderator who is in the room. Nobody can act on the host or on themselves. Moderators have every host control, including ending the room.
@@ -125,7 +128,7 @@ Tables (`site/supabase/2026-10-chautari.sql`, plus the moderators and scheduling
 - **Creating a room** (`POST /rooms`): optional `scheduledFor` (5 min to 30 days ahead), `bannerUrl` (must be a URL returned by `POST /banner`, checked against our bucket prefix), `moderators` (up to 3 @usernames, each must have a profile). Pre-assigned moderators are participant rows with `role = moderator` and `left_at` set, so they hold the role without counting as present.
 - **Banners** (`POST /banner`): base64 photo in, resized by `sharp` to a 1200×675 JPEG with EXIF stripped, stored in the public `chautari-banners` bucket, public URL out. Rate limited.
 - **Listing**: `GET /discover` (public) returns live rooms and unexpired bookings with `bannerUrl`, `hostUsername`, `hostAvatarUrl` and counts. `GET /rooms/[slug]` (public) returns details, host and moderators, plus `canStart` when signed in. `GET /rooms/mine` lists live and scheduled rooms the caller hosts or moderates.
-- **Push**: a room changing to `live` (including from `scheduled`) fires `send-chautari-live-push` through the `chautari_rooms` database webhook.
+- **Push**: a room changing to `live` (including from `scheduled`) fires `send-chautari-live-push` through the `chautari_rooms` database webhook. It alerts only the host's followers with `notify` on, on phones linked to them with Chautari alerts on. There is no "every room" alert.
 
 ### Reader profiles and follows (`/api/reader/*`)
 
@@ -134,6 +137,7 @@ Tables (`site/supabase/2026-10-chautari.sql`, plus the moderators and scheduling
 - The username rule (`^[a-z0-9_]{3,30}$` plus a reserved list) exists in three places that must agree: the database check constraint, `site/src/lib/reader/profile.ts`, and the app's `src/features/profile/validators.ts`.
 - `POST /profile/check-username` and `GET /profile/[username]` are public (the first is rate limited). `GET /profile/[username]/follow-status` is public with optional auth: `{ is_following, follower_count, is_self }`.
 - `POST /follows` `{ followee_username }` and `DELETE /follows/[username]` are idempotent and return the new `follower_count`; following yourself is `409`.
+- `PATCH /follows/[username]` `{ notify }` sets `user_follows.notify`: whether the follower hears about that reader's Chautari rooms (went live, invited you). `404 not_following` if there is no edge. `follow-status` returns `notify`. The app asks right after a follow (`FollowAlertPrompt`); the per-person switch is on the profile.
 - `reader_profiles` and `user_follows` allow public `select` and no client writes: all writes use the service role after the Clerk check.
 
 ### Newsletter and contact (pre-existing)
@@ -144,9 +148,11 @@ Tables (`site/supabase/2026-10-chautari.sql`, plus the moderators and scheduling
 ### Push (this repo's `supabase/`)
 
 - Breaking news (`send-breaking-push`) is the original pipeline: a database webhook on `articles` fires when a story is published with `is_breaking`, and the push opens the story. Browsers get the same story through the site's separate Web Push (`push_subscriptions`, VAPID), which the app does not use. As of 2026-11-17 the droplet's `.env` has no VAPID keys, so browser push likely isn't sending.
-- `mobile_push_tokens` is written only through RPCs (`register_push_token`, `unregister_push_token`, `set_chautari_push_preference`, `set_reminder_push_preference`); the anon key cannot read the list.
+- `mobile_push_tokens` is written only through RPCs (`register_push_token`, `unregister_push_token`, `set_breaking_push_preference`, `set_chautari_push_preference`, `set_reminder_push_preference`); the anon key cannot read the list. Breaking news, Chautari and reminders are independent opt-ins (`breaking_enabled`, `chautari_enabled`, `reminders_enabled`); the token row exists while any is on. `clerk_user_id` (set only by the site's `/api/reader/push-token`) is how alerts about people reach one reader's phones; the app links after each registration and unlinks before sign-out.
 - Each sender dedupes by inserting into a log table keyed on what it notifies about (`mobile_push_log.article_id`, `chautari_push_log.room_id`, `reminder_push_log.sent_on`), and authenticates callers with the `x-webhook-secret` header against its `WEBHOOK_SECRET`.
-- `send-reminder-push` is called by `pg_cron` (job `reminder-push`, Tue/Thu/Sat 02:15 UTC = 08:00 NPT), not by a webhook.
+- `send-reminder-push` is called by `pg_cron` (job `reminder-push`, Tue/Thu/Sat 02:15 UTC = 08:00 NPT), not by a webhook. It skips phones seen in the last 3 days (`last_seen_at`, refreshed on launch and on returning to the app, at most every 12 h) or reminded in the last 4 (`last_reminded_at`).
+- `send-chautari-invite-push` is triggered by a webhook on `chautari_invites` INSERT; it claims the row via `notified_at`.
+- Look: Android uses `assets/notification-icon.png` (white-on-transparent logo) and `notification-large-icon.png`, set in the `expo-notifications` plugin in `app.json` (native: needs a new build). iOS always shows the app icon. Senders add `richContent.image` (story hero, room banner), `subtitle`, `threadId` and `ttl`.
 
 ## Testing constraints
 

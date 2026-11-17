@@ -1,5 +1,15 @@
 import React, { useEffect, useMemo } from "react";
-import { Animated, Easing, Modal, Pressable, StyleSheet, View } from "react-native";
+import {
+  Animated,
+  Easing,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "@/hooks/useTheme";
@@ -8,15 +18,20 @@ import { spacing } from "@/theme/tokens";
 /**
  * The paper sheet Chautari's menus slide up on: ink rule along the top, a
  * grabber, dimmed room behind. Tapping outside or the back button closes it.
+ *
+ * `withInput` is for a sheet holding a text field: the sheet rises above the
+ * keyboard, and its content scrolls when the keyboard leaves too little room.
  */
 export function BottomSheet({
   visible,
   onClose,
   children,
+  withInput = false,
 }: {
   visible: boolean;
   onClose: () => void;
   children: React.ReactNode;
+  withInput?: boolean;
 }) {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
@@ -39,26 +54,41 @@ export function BottomSheet({
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={onClose}>
-      <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
-      <Animated.View
-        style={[
-          styles.sheet,
-          {
-            backgroundColor: palette.paper,
-            borderTopColor: palette.ink,
-            paddingBottom: Math.max(20, insets.bottom + 8),
-            transform: [{ translateY }],
-          },
-        ]}
+      <KeyboardAvoidingView
+        style={styles.frame}
+        behavior={withInput && Platform.OS === "ios" ? "padding" : undefined}
+        enabled={withInput}
       >
-        <View style={[styles.grabber, { backgroundColor: palette.rule2 }]} />
-        {children}
-      </Animated.View>
+        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close" />
+        <Animated.View
+          style={[
+            styles.sheet,
+            {
+              backgroundColor: palette.paper,
+              borderTopColor: palette.ink,
+              paddingBottom: Math.max(20, insets.bottom + 8),
+              transform: [{ translateY }],
+            },
+          ]}
+        >
+          <View style={[styles.grabber, { backgroundColor: palette.rule2 }]} />
+          {withInput ? (
+            <ScrollView keyboardShouldPersistTaps="handled" bounces={false}>
+              {children}
+            </ScrollView>
+          ) : (
+            children
+          )}
+        </Animated.View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  // The sheet sits in the flow at the bottom, so the keyboard-avoiding
+  // padding below it lifts it.
+  frame: { flex: 1, justifyContent: "flex-end" },
   backdrop: {
     position: "absolute",
     top: 0,
@@ -68,10 +98,6 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.35)",
   },
   sheet: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
     maxHeight: "80%",
     paddingHorizontal: spacing.gutter,
     paddingTop: 10,

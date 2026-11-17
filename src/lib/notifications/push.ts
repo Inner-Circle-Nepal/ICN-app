@@ -18,10 +18,12 @@ import {
 import { brandColors } from "@/theme/tokens";
 import {
   registerPushToken,
+  setBreakingPushPreference,
   setChautariPushPreference,
   setReminderPushPreference,
   unregisterPushToken,
 } from "@/lib/api/pushRegistry";
+import { emitPushTokenRegistered } from "./tokenEvents";
 
 /**
  * Breaking-news notification infrastructure for Inner Circle Nepal Mobile.
@@ -114,7 +116,52 @@ export async function getPushNotificationState(): Promise<PushNotificationState>
   }
 }
 
-export async function enablePushNotifications(): Promise<PushNotificationState> {
+/*
+ * Three opt-ins share one registration: breaking news, Chautari alerts (from
+ * the people you follow) and reminders. Any of them can be turned on first,
+ * and that one asks the OS for permission; the token row then carries all
+ * three preferences, and goes away only when all three are off.
+ */
+
+/** Read the three stored opt-ins. */
+async function storedOptIns() {
+  const [breaking, chautari, reminders] = await Promise.all([
+    getStoredNotificationsPref(),
+    getStoredChautariNotificationsPref(),
+    getStoredReminderNotificationsPref(),
+  ]);
+  return { breaking, chautari, reminders, any: breaking || chautari || reminders };
+}
+
+async function permissionGranted(): Promise<boolean> {
+  const N = Platform.OS !== "web" ? notificationsModule() : null;
+  if (!N) return false;
+  try {
+    return (await N.getPermissionsAsync()).granted;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Register a token with every stored opt-in. `register_push_token` creates a
+ * new row with Chautari and reminders off, so those are replayed every time.
+ */
+async function registerWithOptIns(token: string): Promise<boolean> {
+  const optIns = await storedOptIns();
+  const ok = await registerPushToken(token, optIns.breaking);
+  if (optIns.chautari) await setChautariPushPreference(token, true);
+  if (optIns.reminders) await setReminderPushPreference(token, true);
+  if (ok) emitPushTokenRegistered(token);
+  return ok;
+}
+
+/**
+ * Ask for permission if needed (the OS prompt), make sure the Android
+ * channels exist, get this phone's token and register it. Called by whichever
+ * opt-in is turned on, after it has stored its own preference.
+ */
+async function ensureRegistered(): Promise<PushNotificationState> {
   if (Platform.OS === "web") {
     return {
       permission: "unsupported",
@@ -142,9 +189,9 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
       vibrationPattern: [0, 200, 120, 200],
     });
     await N.setNotificationChannelAsync("chautari-live", {
-      name: "Chautari — live rooms",
-      description: "Alerts when a Chautari live audio room opens",
-      importance: N.AndroidImportance.DEFAULT,
+      name: "Chautari: people you follow",
+      description: "When someone you follow goes live, or invites you to a room",
+      importance: N.AndroidImportance.HIGH,
       lightColor: brandColors.icn700,
       vibrationPattern: [0, 150, 100, 150],
     });
@@ -168,7 +215,6 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
   }
 
   if (!granted) {
-    await setStoredNotificationsPref(false);
     return {
       permission: canAskAgain ? "undetermined" : "denied",
       enabled: false,
@@ -191,18 +237,9 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
         : await N.getDevicePushTokenAsync();
       token = String(pushTokenResponse.data);
       await setSecurePushToken(token);
-      if (!(await registerPushToken(token))) {
+      if (!(await registerWithOptIns(token))) {
         statusNote =
           "Alerts are on. We could not reach the newsroom just now; this phone will be registered the next time the app opens.";
-      }
-      // Replay the Chautari preference: if the reader had it on previously,
-      // turned push off, and is now turning push back on, carry the opt-in
-      // across. The row was just re-created with the default (false).
-      if (await getStoredChautariNotificationsPref()) {
-        await setChautariPushPreference(token, true);
-      }
-      if (await getStoredReminderNotificationsPref()) {
-        await setReminderPushPreference(token, true);
       }
     } catch {
       statusNote =
@@ -213,119 +250,126 @@ export async function enablePushNotifications(): Promise<PushNotificationState> 
       "Notification permission granted on simulator. Physical device required for a remote push token.";
   }
 
-  await setStoredNotificationsPref(true);
+  return { permission: "granted", enabled: true, deviceToken: token, statusNote };
+}
 
-  return {
-    permission: "granted",
-    enabled: true,
-    deviceToken: token,
-    statusNote,
-  };
+/** Remove this phone's registration once nothing on it wants alerts. */
+async function unregisterIfUnused(): Promise<void> {
+  if ((await storedOptIns()).any) return;
+  const token = await getSecurePushToken();
+  if (token) await unregisterPushToken(token);
+  await clearSecurePushToken();
+}
+
+/** Breaking news on: the Settings switch and the soft-ask nudge. */
+export async function enablePushNotifications(): Promise<PushNotificationState> {
+  await setStoredNotificationsPref(true);
+  const state = await ensureRegistered();
+  if (!state.enabled) await setStoredNotificationsPref(false);
+  return state;
 }
 
 export async function disablePushNotifications(): Promise<PushNotificationState> {
   await setStoredNotificationsPref(false);
   const token = await getSecurePushToken();
-  if (token) await unregisterPushToken(token);
-  await clearSecurePushToken();
+  if (token) await setBreakingPushPreference(token, false);
+  await unregisterIfUnused();
 
   const state = await getPushNotificationState();
-  return {
-    ...state,
-    enabled: false,
-    deviceToken: null,
-    statusNote: null,
-  };
+  return { ...state, enabled: false, statusNote: null };
 }
 
 /**
- * Chautari-live push preference. Independent of the breaking-news toggle,
- * but requires push to be enabled at all (the row in `mobile_push_tokens`
- * must exist for the preference flip to have anywhere to land).
+ * Chautari alerts: the master switch over alerts from the people you follow
+ * (they went live, they invited you). Which people is chosen per follow, on
+ * their profile; this switch silences all of them at once.
  */
 
 export type ChautariPushState = {
   enabled: boolean;
-  /** True iff the breaking-news toggle is on; Chautari requires it. */
-  pushAvailable: boolean;
+  statusNote: string | null;
 };
 
 export async function getChautariPushState(): Promise<ChautariPushState> {
-  const [pushEnabled, chautariEnabled] = await Promise.all([
-    getStoredNotificationsPref(),
+  const [stored, granted] = await Promise.all([
     getStoredChautariNotificationsPref(),
+    permissionGranted(),
   ]);
-  return {
-    enabled: pushEnabled && chautariEnabled,
-    pushAvailable: pushEnabled,
-  };
+  return { enabled: stored && granted, statusNote: null };
 }
 
+/** May show the OS prompt, when this is the first alert the reader turns on. */
 export async function enableChautariPush(): Promise<ChautariPushState> {
-  const token = await getSecurePushToken();
   await setStoredChautariNotificationsPref(true);
-  if (token) await setChautariPushPreference(token, true);
-  return getChautariPushState();
+  const state = await ensureRegistered();
+  if (!state.enabled) {
+    await setStoredChautariNotificationsPref(false);
+    return { enabled: false, statusNote: state.statusNote };
+  }
+  return { enabled: true, statusNote: state.statusNote };
 }
 
 export async function disableChautariPush(): Promise<ChautariPushState> {
-  const token = await getSecurePushToken();
   await setStoredChautariNotificationsPref(false);
+  const token = await getSecurePushToken();
   if (token) await setChautariPushPreference(token, false);
-  return getChautariPushState();
+  await unregisterIfUnused();
+  return { enabled: false, statusNote: null };
 }
 
 /**
- * Reminder push preference. Same shape as [[ChautariPushState]] — a
- * separate opt-in, but requires the token row (i.e. breaking-news push)
- * to exist. Sent three times a week by a pg_cron-scheduled Edge Function.
+ * Reminder push preference: an occasional nudge, sent by a pg_cron-scheduled
+ * Edge Function and skipped for readers who open the app anyway.
  */
 
 export type ReminderPushState = {
   enabled: boolean;
-  /** True iff the breaking-news toggle is on; reminders require it. */
-  pushAvailable: boolean;
+  statusNote: string | null;
 };
 
 export async function getReminderPushState(): Promise<ReminderPushState> {
-  const [pushEnabled, reminderEnabled] = await Promise.all([
-    getStoredNotificationsPref(),
+  const [stored, granted] = await Promise.all([
     getStoredReminderNotificationsPref(),
+    permissionGranted(),
   ]);
-  return {
-    enabled: pushEnabled && reminderEnabled,
-    pushAvailable: pushEnabled,
-  };
+  return { enabled: stored && granted, statusNote: null };
 }
 
 export async function enableReminderPush(): Promise<ReminderPushState> {
-  const token = await getSecurePushToken();
   await setStoredReminderNotificationsPref(true);
-  if (token) await setReminderPushPreference(token, true);
-  return getReminderPushState();
+  const state = await ensureRegistered();
+  if (!state.enabled) {
+    await setStoredReminderNotificationsPref(false);
+    return { enabled: false, statusNote: state.statusNote };
+  }
+  return { enabled: true, statusNote: state.statusNote };
 }
 
 export async function disableReminderPush(): Promise<ReminderPushState> {
-  const token = await getSecurePushToken();
   await setStoredReminderNotificationsPref(false);
+  const token = await getSecurePushToken();
   if (token) await setReminderPushPreference(token, false);
-  return getReminderPushState();
+  await unregisterIfUnused();
+  return { enabled: false, statusNote: null };
 }
 
 /**
- * Re-register on launch for a reader who has alerts on.
+ * Re-register on launch for a reader with any alert on.
  *
  * Expo tokens can change (reinstall, restore to a new phone), an opt-in made
  * offline never reached Supabase, and the stored language/edition may have
- * changed since. Never prompts: if permission was withdrawn in system
- * settings, the old token is removed instead. Silent on any failure.
+ * changed since. It also refreshes `last_seen_at`, which is how the reminder
+ * sender knows this reader opens the app anyway. Never prompts: if permission
+ * was withdrawn in system settings, the old token is removed instead. Silent
+ * on any failure.
  */
 export async function syncPushRegistration(): Promise<void> {
   if (Platform.OS === "web" || !Device.isDevice) return;
+  lastSyncAt = Date.now();
   const N = notificationsModule();
   if (!N) return;
   try {
-    if (!(await getStoredNotificationsPref())) return;
+    if (!(await storedOptIns()).any) return;
     const previous = await getSecurePushToken();
 
     const { granted } = await N.getPermissionsAsync();
@@ -341,20 +385,25 @@ export async function syncPushRegistration(): Promise<void> {
 
     if (previous && previous !== current) await unregisterPushToken(previous);
     if (current !== previous) await setSecurePushToken(current);
-    await registerPushToken(current);
-    // Replay the Chautari preference: `register_push_token` upserts the row
-    // but defaults `chautari_enabled` to false, so a reader who opted in
-    // on an earlier launch would otherwise have the preference silently
-    // dropped every time the token is refreshed. Same for reminders.
-    if (await getStoredChautariNotificationsPref()) {
-      await setChautariPushPreference(current, true);
-    }
-    if (await getStoredReminderNotificationsPref()) {
-      await setReminderPushPreference(current, true);
-    }
+    await registerWithOptIns(current);
   } catch {
     // Next launch tries again.
   }
+}
+
+/** When this app session last re-registered; launch counts. */
+let lastSyncAt = 0;
+const RESUME_SYNC_EVERY_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * Re-register when the app comes back to the foreground, at most every 12
+ * hours. A reader who never closes the app would otherwise look absent to
+ * the reminder sender (`last_seen_at` only moved on a cold start) and get
+ * nudged while reading daily.
+ */
+export async function syncPushRegistrationOnResume(): Promise<void> {
+  if (Date.now() - lastSyncAt < RESUME_SYNC_EVERY_MS) return;
+  await syncPushRegistration();
 }
 
 export { extractNotificationPath } from "./path";

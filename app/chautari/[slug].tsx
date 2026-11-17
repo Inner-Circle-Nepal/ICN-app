@@ -43,6 +43,7 @@ import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { ListenerTile, SpeakerTile } from "@/components/chautari/RoomTiles";
 import { RoomControls } from "@/components/chautari/RoomControls";
+import { InviteSheet } from "@/components/chautari/InviteSheet";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
 import { useMyProfile } from "@/features/profile/useMyProfile";
@@ -428,6 +429,19 @@ function ChautariRoomScreenActive() {
   );
   const [handsOpen, setHandsOpen] = useState(false);
 
+  // Invite people: the host or a moderator, booked or live. Nobody running
+  // the room is offered, nor the reader themselves.
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const inviteExclude = useMemo(
+    () =>
+      [
+        profile?.username,
+        roomDetails?.host.username,
+        ...(roomDetails?.moderators.map((m) => m.username) ?? []),
+      ].filter((u): u is string => Boolean(u)),
+    [profile?.username, roomDetails],
+  );
+
   /*
    * A moderator has two ways out: slip away, or end the room for everyone
    * (they hold the host's controls). The host's own button always ends it.
@@ -517,8 +531,15 @@ function ChautariRoomScreenActive() {
           starting={starting}
           onGoLive={goLive}
           onCancel={cancel}
+          onInvite={() => setInviteOpen(true)}
           onOpenProfile={viewProfile}
           insetsBottom={insets.bottom}
+        />
+        <InviteSheet
+          visible={inviteOpen}
+          onClose={() => setInviteOpen(false)}
+          slug={slug}
+          exclude={inviteExclude}
         />
       </Shell>
     );
@@ -649,6 +670,20 @@ function ChautariRoomScreenActive() {
               </View>
             ) : null}
 
+            {canModerate ? (
+              <Pressable
+                onPress={() => setInviteOpen(true)}
+                accessibilityRole="button"
+                accessibilityLabel="Invite people to this room"
+                hitSlop={8}
+                style={styles.inviteLink}
+              >
+                <Text style={[styles.inviteLinkText, { color: palette.ink }]}>
+                  Invite people
+                </Text>
+              </Pressable>
+            ) : null}
+
             {room.micError ? (
               <View style={[styles.notice, { borderLeftColor: palette.red }]}>
                 <Text
@@ -763,6 +798,13 @@ function ChautariRoomScreenActive() {
         onToggleBlock={toggleBlock}
         onReport={sendReport}
         onViewProfile={viewProfile}
+      />
+
+      <InviteSheet
+        visible={inviteOpen && canModerate}
+        onClose={() => setInviteOpen(false)}
+        slug={slug}
+        exclude={inviteExclude}
       />
 
       <HandsSheet
@@ -947,6 +989,14 @@ function SectionHeader({
 /* ------------------------------------------------------------------- styles */
 
 const styles = StyleSheet.create({
+  inviteLink: { alignSelf: "flex-start", marginTop: 12 },
+  inviteLinkText: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 11,
+    letterSpacing: 1.1,
+    textTransform: "uppercase",
+    textDecorationLine: "underline",
+  },
   screen: { flex: 1 },
 
   topBar: {

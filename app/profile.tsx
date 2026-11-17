@@ -26,6 +26,7 @@ import {
   validateBio,
   validateDisplayName,
 } from "@/features/profile/validators";
+import { releasePushToken } from "@/features/profile/PushAccountLink";
 import { Avatar } from "@/components/chautari/Avatar";
 import { ErrorState } from "@/components/ErrorState";
 import { useTheme } from "@/hooks/useTheme";
@@ -88,7 +89,7 @@ function ProfileScreenActive() {
   const router = useRouter();
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
-  const { isSignedIn, isLoaded, signOut } = useAuth();
+  const { isSignedIn, isLoaded, signOut, getToken } = useAuth();
   const { user } = useUser();
   const { profile, isLoading: profileLoading } = useMyProfile();
   const update = useUpdateMyProfile();
@@ -269,15 +270,19 @@ function ProfileScreenActive() {
           text: "Sign out",
           style: "destructive",
           onPress: () => {
-            void signOut().then(
-              () => router.replace("/settings"),
-              () => setError("Could not sign out. Please try again."),
-            );
+            // This phone stops getting the reader's follow alerts first,
+            // while there is still a session to prove who is asking.
+            void releasePushToken(getToken)
+              .then(() => signOut())
+              .then(
+                () => router.replace("/settings"),
+                () => setError("Could not sign out. Please try again."),
+              );
           },
         },
       ],
     );
-  }, [signOut, router]);
+  }, [signOut, getToken, router]);
 
   /**
    * Delete the account, which App Store guideline 5.1.1(v) requires of any app
@@ -297,8 +302,8 @@ function ProfileScreenActive() {
           onPress: () => {
             setNotice(null);
             setError(null);
-            void user
-              .delete()
+            void releasePushToken(getToken)
+              .then(() => user.delete())
               .then(() => signOut())
               .then(
                 () => router.replace("/settings"),
@@ -316,7 +321,7 @@ function ProfileScreenActive() {
         },
       ],
     );
-  }, [user, signOut, router]);
+  }, [user, signOut, getToken, router]);
 
   /* ------------------------------------------------------------- gates */
 

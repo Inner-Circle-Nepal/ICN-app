@@ -20,6 +20,7 @@ export function WaitingRoom({
   starting,
   onGoLive,
   onCancel,
+  onInvite,
   onOpenProfile,
   insetsBottom,
 }: {
@@ -28,6 +29,8 @@ export function WaitingRoom({
   starting: boolean;
   onGoLive: () => void;
   onCancel: () => void;
+  /** Host or moderator: invite people to this room. */
+  onInvite: () => void;
   onOpenProfile: (username: string) => void;
   insetsBottom: number;
 }) {
@@ -112,6 +115,21 @@ export function WaitingRoom({
             </Pressable>
           ))}
 
+          {canStart ? (
+            <Pressable
+              onPress={onInvite}
+              accessibilityRole="button"
+              accessibilityLabel="Invite people to this room"
+              style={({ pressed }) => [
+                styles.invite,
+                { borderColor: palette.ink },
+                pressed && styles.pressed,
+              ]}
+            >
+              <Text style={[styles.btnText, { color: palette.ink }]}>Invite people</Text>
+            </Pressable>
+          ) : null}
+
           {!canStart ? (
             <Text style={[styles.note, { color: palette.quiet }]}>
               The room opens when its host or a moderator starts it. Keep this page open and
@@ -172,6 +190,13 @@ export function WaitingRoom({
 }
 
 const styles = StyleSheet.create({
+  invite: {
+    marginTop: 18,
+    borderWidth: 1,
+    minHeight: 46,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   flex: { flex: 1 },
   body: {},
   banner: { width: "100%", aspectRatio: 16 / 9 },

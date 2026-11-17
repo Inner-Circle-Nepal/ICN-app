@@ -27,6 +27,11 @@ import { SectionRule } from "@/components/SectionRule";
 import { ArticleCard } from "@/components/ArticleCard";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
+import { ReaderRow } from "@/components/UserSearchField";
+import { useUserSearch } from "@/features/profile/useUserSearch";
+import type { ReaderProfile } from "@/lib/api/readerProfile";
+
+type Tab = "stories" | "people";
 
 /**
  * Search & Topic Discovery Screen (`app/search.tsx`).
@@ -36,12 +41,16 @@ import { ErrorState } from "@/components/ErrorState";
  *     and `ilike` fallback for Nepali / Devanagari queries
  *   - Supports filtering by Topic Tag (`?tag=nepse`, etc.)
  *   - Persists recent searches in `AsyncStorage`
+ *
+ * The People tab (`?tab=people`) searches readers by @handle or name, for
+ * finding someone to follow. It shares the text field with Stories.
  */
 export default function SearchScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams<{ q?: string; tag?: string }>();
+  const params = useLocalSearchParams<{ q?: string; tag?: string; tab?: string }>();
   const { palette } = useTheme();
 
+  const [tab, setTab] = useState<Tab>(params.tab === "people" ? "people" : "stories");
   const [query, setQuery] = useState(params.q ?? "");
   const [debouncedQuery, setDebouncedQuery] = useState(params.q ?? "");
   const [activeTag, setActiveTag] = useState<string | null>(params.tag ?? null);
@@ -89,8 +98,10 @@ export default function SearchScreen() {
     debouncedQuery.length < 2 ? activeTag : null,
   );
   const tagsQuery = useTags();
+  const people = useUserSearch(tab === "people" ? query : "", { limit: 20 });
 
   const handleSubmit = async () => {
+    if (tab === "people") return;
     const cleaned = query.trim();
     if (cleaned.length >= 2) {
       setDebouncedQuery(cleaned);
@@ -133,6 +144,15 @@ export default function SearchScreen() {
       ? tagArticlesQuery.isError
       : false;
 
+  type Item =
+    | { kind: "article"; key: string; article: (typeof results)[number] }
+    | { kind: "reader"; key: string; profile: ReaderProfile };
+  const items: Item[] =
+    tab === "people"
+      ? people.results.map((p) => ({ kind: "reader", key: `@${p.username}`, profile: p }))
+      : results.map((a) => ({ kind: "article", key: a.id, article: a }));
+  const peopleTyped = query.trim().replace(/^@+/, "").length > 0;
+
   return (
     <View style={[styles.screen, { backgroundColor: palette.paper }]}>
       {/* Top Bar */}
@@ -173,18 +193,48 @@ export default function SearchScreen() {
       </View>
 
       <FlatList
-        data={results}
-        keyExtractor={(item) => item.id}
+        data={items}
+        keyExtractor={(item) => item.key}
         keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <View style={styles.headerBlock}>
             <Text style={[styles.kicker, { color: palette.quiet }]}>
-              Search the newsroom
+              {tab === "people" ? "Search readers" : "Search the newsroom"}
             </Text>
             <Text style={[styles.headline, { color: palette.ink }]}>
-              Find stories, dispatches & topics
+              {tab === "people" ? "Find people to follow" : "Find stories, dispatches & topics"}
             </Text>
+
+            <View style={styles.tabs}>
+              {(
+                [
+                  { key: "stories", label: "Stories" },
+                  { key: "people", label: "People" },
+                ] as const
+              ).map((opt) => {
+                const active = tab === opt.key;
+                return (
+                  <Pressable
+                    key={opt.key}
+                    onPress={() => setTab(opt.key)}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: active }}
+                    style={[
+                      styles.tabBtn,
+                      {
+                        borderColor: palette.ink,
+                        backgroundColor: active ? palette.ink : "transparent",
+                      },
+                    ]}
+                  >
+                    <Text style={[styles.tabText, { color: active ? palette.paper : palette.ink }]}>
+                      {opt.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
 
             <SearchInput
               value={query}
@@ -195,12 +245,28 @@ export default function SearchScreen() {
                 }
               }}
               onSubmit={() => void handleSubmit()}
+              placeholder={tab === "people" ? "@handle or name" : undefined}
               autoFocus={!params.tag}
               style={styles.searchInput}
             />
 
+            {tab === "people" ? (
+              peopleTyped ? (
+                <View style={styles.resultsHeader}>
+                  <SectionRule
+                    title="Readers"
+                    cta={people.searching ? "Searching…" : `${people.results.length} found`}
+                  />
+                </View>
+              ) : (
+                <Text style={[styles.peopleHint, { color: palette.quiet }]}>
+                  Type @ and the start of a handle, or part of someone&apos;s name.
+                </Text>
+              )
+            ) : null}
+
             {/* Active Tag Filter Banner */}
-            {isFilteringTag && activeTag ? (
+            {tab === "stories" && isFilteringTag && activeTag ? (
               <View
                 style={[
                   styles.activeTagBar,
@@ -227,7 +293,7 @@ export default function SearchScreen() {
             ) : null}
 
             {/* Idle state: Recent Searches + Topics */}
-            {!isSearchingText && !isFilteringTag ? (
+            {tab === "people" ? null : !isSearchingText && !isFilteringTag ? (
               <View style={styles.idlePanels}>
                 {recentSearches.length > 0 ? (
                   <View style={styles.panelSection}>
@@ -309,7 +375,25 @@ export default function SearchScreen() {
           </View>
         }
         ListEmptyComponent={
-          isLoading ? (
+          tab === "people" ? (
+            !peopleTyped ? undefined : people.searching ? (
+              <View style={styles.loaderWrap}>
+                <ActivityIndicator color={palette.ink} />
+              </View>
+            ) : people.isError ? (
+              <ErrorState
+                title="Search unavailable"
+                message="We could not search readers right now."
+                onRetry={() => void people.refetch()}
+              />
+            ) : (
+              <EmptyState
+                kicker="0 matches"
+                title="No reader by that name"
+                description="Only readers who have set up a profile can be found. Check the spelling of the handle."
+              />
+            )
+          ) : isLoading ? (
             <View style={styles.loaderWrap}>
               <ActivityIndicator color={palette.ink} />
             </View>
@@ -333,19 +417,35 @@ export default function SearchScreen() {
             />
           ) : undefined
         }
-        renderItem={({ item, index }) => (
-          <View
-            style={[
-              styles.resultRow,
-              index > 0 && {
-                borderTopWidth: 1,
-                borderTopColor: palette.rule,
-              },
-            ]}
-          >
-            <ArticleCard article={item} />
-          </View>
-        )}
+        renderItem={({ item, index }) =>
+          item.kind === "reader" ? (
+            <View
+              style={
+                index > 0 ? { borderTopWidth: 1, borderTopColor: palette.rule } : undefined
+              }
+            >
+              <ReaderRow
+                profile={item.profile}
+                onPress={() =>
+                  router.push(`/user/${encodeURIComponent(item.profile.username)}`)
+                }
+                accessibilityHint="Opens their profile"
+              />
+            </View>
+          ) : (
+            <View
+              style={[
+                styles.resultRow,
+                index > 0 && {
+                  borderTopWidth: 1,
+                  borderTopColor: palette.rule,
+                },
+              ]}
+            >
+              <ArticleCard article={item.article} />
+            </View>
+          )
+        }
       />
     </View>
   );
@@ -404,6 +504,30 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     marginTop: 16,
+  },
+  tabs: {
+    flexDirection: "row",
+    gap: 8,
+    marginTop: 16,
+  },
+  tabBtn: {
+    flex: 1,
+    minHeight: 38,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  tabText: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 11,
+    letterSpacing: 1.2,
+    textTransform: "uppercase",
+  },
+  peopleHint: {
+    fontFamily: fontFamilies.serifRegular,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 18,
   },
   activeTagBar: {
     marginTop: 14,

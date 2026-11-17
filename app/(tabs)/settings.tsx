@@ -289,14 +289,10 @@ export default function SettingsScreen() {
         );
       }
     } else {
+      // Breaking news only: Chautari alerts and reminders keep their own
+      // switches and the phone stays registered for them.
       await disablePushNotifications();
       setNotificationsEnabled(false);
-      // Turning push off also pauses Chautari and reminder alerts (the
-      // token row is gone, so the server-side preference has nowhere to
-      // live). Keep the local preferences as-is so flipping push back on
-      // restores them.
-      setChautariEnabled(false);
-      setReminderEnabled(false);
       setNotifStatusMessage("Breaking-news alerts paused.");
     }
   };
@@ -308,9 +304,10 @@ export default function SettingsScreen() {
       const res = await enableChautariPush();
       setChautariEnabled(res.enabled);
       setChautariStatusMessage(
-        res.enabled
-          ? "Chautari alerts enabled."
-          : "Could not enable Chautari alerts.",
+        res.statusNote ??
+          (res.enabled
+            ? "Chautari alerts on for the people you chose to hear from."
+            : "Notification permission was not granted."),
       );
     } else {
       await disableChautariPush();
@@ -326,9 +323,10 @@ export default function SettingsScreen() {
       const res = await enableReminderPush();
       setReminderEnabled(res.enabled);
       setReminderStatusMessage(
-        res.enabled
-          ? "Reminders enabled. A nudge arrives Tuesday, Thursday, and Saturday."
-          : "Could not enable reminders.",
+        res.statusNote ??
+          (res.enabled
+            ? "Reminders enabled. We skip them when you've been reading anyway."
+            : "Notification permission was not granted."),
       );
     } else {
       await disableReminderPush();
@@ -661,20 +659,15 @@ export default function SettingsScreen() {
             />
           </View>
 
-          <View
-            style={[
-              styles.switchRow,
-              { borderBottomColor: palette.rule },
-              !notificationsEnabled && styles.switchRowMuted,
-            ]}
-          >
+          <View style={[styles.switchRow, { borderBottomColor: palette.rule }]}>
             <View style={styles.switchTextCol}>
               <Text style={[styles.settingTitle, { color: palette.ink }]}>
-                Chautari — Live Room Alerts
+                Chautari — People You Follow
               </Text>
               <Text style={[styles.settingDesc, { color: palette.quiet }]}>
-                Ping me whenever a new Chautari live audio room opens. Requires
-                push notifications above to be on.
+                When someone you chose to hear from goes live or invites you to a
+                room. Pick who on each person&apos;s profile; this switch pauses
+                them all.
               </Text>
               {chautariStatusMessage ? (
                 <Text style={[styles.notifFeedback, { color: palette.ink2 }]}>
@@ -685,26 +678,19 @@ export default function SettingsScreen() {
             <Switch
               value={chautariEnabled}
               onValueChange={(val) => void handleToggleChautari(val)}
-              disabled={!notificationsEnabled}
               trackColor={{ false: palette.rule2, true: palette.ink }}
               thumbColor={palette.paper}
             />
           </View>
 
-          <View
-            style={[
-              styles.switchRow,
-              { borderBottomColor: palette.rule },
-              !notificationsEnabled && styles.switchRowMuted,
-            ]}
-          >
+          <View style={[styles.switchRow, { borderBottomColor: palette.rule }]}>
             <View style={styles.switchTextCol}>
               <Text style={[styles.settingTitle, { color: palette.ink }]}>
                 Weekly Reminders
               </Text>
               <Text style={[styles.settingDesc, { color: palette.quiet }]}>
-                A light nudge on Tuesday, Thursday, and Saturday morning.
-                Requires push notifications above to be on.
+                An occasional morning nudge, only if you haven&apos;t opened the
+                app in a few days.
               </Text>
               {reminderStatusMessage ? (
                 <Text style={[styles.notifFeedback, { color: palette.ink2 }]}>
@@ -715,7 +701,6 @@ export default function SettingsScreen() {
             <Switch
               value={reminderEnabled}
               onValueChange={(val) => void handleToggleReminders(val)}
-              disabled={!notificationsEnabled}
               trackColor={{ false: palette.rule2, true: palette.ink }}
               thumbColor={palette.paper}
             />
@@ -1160,9 +1145,6 @@ const styles = StyleSheet.create({
     paddingBottom: 18,
     borderBottomWidth: 1,
     gap: 14,
-  },
-  switchRowMuted: {
-    opacity: 0.55,
   },
   hintKicker: {
     fontFamily: fontFamilies.sansMedium,

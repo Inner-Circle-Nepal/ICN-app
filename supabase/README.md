@@ -64,3 +64,43 @@ A story is alerted at most once, however often it is edited afterwards.
   `pg_cron` job that touches due breaking stories.
 - Nepali-language readers get `title_ne` when the story has one, English
   otherwise.
+
+## Alerts about people, invites and quieter reminders (2026-11)
+
+Run the SQL in this order in the SQL editor (each is safe to re-run):
+
+1. `migrations/20261118_reader_profile_search.sql`: people search.
+2. `migrations/20261118_push_accounts.sql`: `clerk_user_id` and
+   `breaking_enabled` on `mobile_push_tokens`; registration takes a breaking flag.
+3. `migrations/20261118_follow_alerts.sql`: `user_follows.notify`.
+4. `migrations/20261118_reminder_throttle.sql`: `last_reminded_at`.
+5. Site repo `supabase/2026-11-chautari-invites.sql`: `chautari_invites`.
+
+Deploy the senders (all `--no-verify-jwt`, same `WEBHOOK_SECRET`):
+
+```bash
+npx supabase functions deploy send-breaking-push --no-verify-jwt
+npx supabase functions deploy send-chautari-live-push --no-verify-jwt
+npx supabase functions deploy send-chautari-invite-push --no-verify-jwt
+npx supabase functions deploy send-reminder-push --no-verify-jwt
+```
+
+One new webhook:
+
+| Field | Value |
+|---|---|
+| Table | `public.chautari_invites` |
+| Events | Insert |
+| Type | Supabase Edge Functions → `send-chautari-invite-push` |
+| HTTP headers | `x-webhook-secret: <the same WEBHOOK_SECRET>` |
+
+Then deploy the site (it reads the new columns), then ship an app build: the
+notification icon is native config and needs a new build, not just Metro.
+
+Who gets what now:
+
+- **Breaking news**: phones with `breaking_enabled`.
+- **Someone went live**: followers of the host with `notify` on, on phones
+  linked to them with `chautari_enabled`. Nobody else.
+- **Invited to a room**: same rule, for the inviter.
+- **Reminders**: `reminders_enabled`, not seen for 3 days, not reminded for 4.

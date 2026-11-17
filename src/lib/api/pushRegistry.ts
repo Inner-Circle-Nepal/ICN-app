@@ -3,7 +3,7 @@ import { getPublicSupabase } from "./supabase";
 import { getStoredEdition, getStoredLanguage } from "@/lib/storage/preferences";
 
 /**
- * Tell the newsroom which phones want breaking-news alerts.
+ * Tell the newsroom which phones want which alerts.
  *
  * Writes go through two Supabase functions (`register_push_token`,
  * `unregister_push_token`, see supabase/migrations/20261030_mobile_push.sql)
@@ -16,7 +16,11 @@ import { getStoredEdition, getStoredLanguage } from "@/lib/storage/preferences";
  * `syncPushRegistration`.
  */
 
-export async function registerPushToken(token: string): Promise<boolean> {
+/**
+ * `breaking` is this phone's breaking-news opt-in. A phone can be registered
+ * only for Chautari alerts or reminders, so registering no longer implies it.
+ */
+export async function registerPushToken(token: string, breaking: boolean): Promise<boolean> {
   const sb = getPublicSupabase();
   if (!sb || (Platform.OS !== "ios" && Platform.OS !== "android")) return false;
   try {
@@ -26,6 +30,7 @@ export async function registerPushToken(token: string): Promise<boolean> {
       p_platform: Platform.OS,
       p_language: language,
       p_edition: edition,
+      p_breaking: breaking,
     });
     return !error;
   } catch {
@@ -44,15 +49,28 @@ export async function unregisterPushToken(token: string): Promise<boolean> {
   }
 }
 
+/** Flip the breaking-news opt-in for a token already registered. */
+export async function setBreakingPushPreference(
+  token: string,
+  enabled: boolean,
+): Promise<boolean> {
+  const sb = getPublicSupabase();
+  if (!sb || (Platform.OS !== "ios" && Platform.OS !== "android")) return false;
+  try {
+    const { error } = await sb.rpc("set_breaking_push_preference", {
+      p_token: token,
+      p_enabled: enabled,
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
 /**
- * Flip the Chautari-live opt-in for a token already in `mobile_push_tokens`.
- *
- * Does not create the row — the phone must already be registered via
- * `registerPushToken` (i.e. the breaking-news toggle is on). If no row
- * exists, the update affects zero rows and the function is a quiet no-op,
- * which is intentional: the Settings UI prevents enabling Chautari when
- * push is off, so hitting this path would be a client-side bug and not
- * something the server should fail loudly over.
+ * Flip the Chautari opt-in (alerts from the people you follow) for a token
+ * already in `mobile_push_tokens`. A quiet no-op when the row is missing:
+ * `push.ts` registers the phone before flipping any preference.
  */
 export async function setChautariPushPreference(
   token: string,
@@ -71,11 +89,7 @@ export async function setChautariPushPreference(
   }
 }
 
-/**
- * Flip the reminder opt-in. Same shape as `setChautariPushPreference`:
- * a no-op update when the row is missing, because the Settings UI
- * requires push to be on before the reminder switch is reachable.
- */
+/** Flip the reminder opt-in. Same shape as `setChautariPushPreference`. */
 export async function setReminderPushPreference(
   token: string,
   enabled: boolean,

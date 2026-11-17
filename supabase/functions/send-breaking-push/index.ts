@@ -22,6 +22,7 @@ type ArticleRecord = {
   title_ne: string | null;
   excerpt: string | null;
   excerpt_ne: string | null;
+  hero_image: string | null;
   status: string;
   is_breaking: boolean;
   published_at: string | null;
@@ -47,6 +48,15 @@ const json = (body: unknown, status = 200) =>
 function trim(text: string | null | undefined, max: number): string {
   const clean = (text ?? "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
   return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
+}
+
+// The story's photo, shown expanded under the alert (Android out of the box;
+// iOS would need a Notification Service Extension). Our own storage images
+// go through the resizer so a phone downloads ~80 KB, not the original.
+function alertImage(url: string | null): string | undefined {
+  if (!url || !/^https:\/\//.test(url)) return undefined;
+  const resized = url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/");
+  return resized === url ? url : `${resized}?width=800&quality=70`;
 }
 
 Deno.serve(async (req) => {
@@ -81,21 +91,29 @@ Deno.serve(async (req) => {
     const { data, error } = await sb
       .from("mobile_push_tokens")
       .select("token, language")
+      .eq("breaking_enabled", true)
       .range(from, from + 999);
     if (error) return json({ error: error.message }, 500);
     tokens.push(...(data ?? []));
     if (!data || data.length < 1000) break;
   }
 
+  const image = alertImage(a.hero_image);
+
   const messages = tokens.map(({ token, language }) => {
     const ne = language === "ne" && a.title_ne;
     return {
       to: token,
-      title: ne ? "ताजा समाचार" : "Breaking",
+      title: ne ? "ताजा समाचार" : "Breaking news",
+      subtitle: "Inner Circle Nepal",
       body: trim(ne ? a.title_ne : a.title, 178),
       sound: "default",
       priority: "high",
       channelId: "breaking-news",
+      threadId: "breaking",
+      // Breaking news that arrives a day late is not breaking.
+      ttl: 6 * 3600,
+      ...(image ? { richContent: { image } } : {}),
       data: { path: `/article/${a.slug}`, slug: a.slug, tag: "breaking" },
     };
   });

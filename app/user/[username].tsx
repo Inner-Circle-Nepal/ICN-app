@@ -1,4 +1,4 @@
-import React, { useCallback } from "react";
+import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -16,6 +16,8 @@ import { Avatar } from "@/components/chautari/Avatar";
 import { useProfile } from "@/features/profile/useProfile";
 import { useFollowMutation, useFollowStatus, useUnfollowMutation } from "@/features/profile/useFollow";
 import { ReaderApiError } from "@/lib/api/readerProfile";
+import { BottomSheet } from "@/components/chautari/BottomSheet";
+import { FollowAlertPrompt, FollowAlertToggle } from "@/components/FollowAlertPrompt";
 
 /**
  * Public reader profile — reachable at `/user/<handle>`.
@@ -45,6 +47,8 @@ export default function PublicProfileScreen() {
   const profile = profileQuery.data ?? null;
   const status = statusQuery.data ?? null;
   const isLoading = profileQuery.isLoading;
+  // Right after following: ask whether to hear about their Chautari rooms.
+  const [askAlerts, setAskAlerts] = useState(false);
 
   const handleFollow = useCallback(() => {
     if (!profile || !status) return;
@@ -53,6 +57,9 @@ export default function PublicProfileScreen() {
       unfollowMut.mutate(profile.username);
     } else {
       followMut.mutate(profile.username, {
+        onSuccess: (res) => {
+          if (!res.already_following) setAskAlerts(true);
+        },
         onError: (e) => {
           const err = e as ReaderApiError;
           if (err.reason === "not_signed_in") router.push("/sign-in");
@@ -159,9 +166,27 @@ export default function PublicProfileScreen() {
                 )}
               </Pressable>
             )}
+
+            {status?.is_following && !status.is_self ? (
+              <FollowAlertToggle
+                name={profile.display_name}
+                username={profile.username}
+                value={status.notify ?? false}
+              />
+            ) : null}
           </>
         )}
       </ScrollView>
+
+      {profile ? (
+        <BottomSheet visible={askAlerts} onClose={() => setAskAlerts(false)}>
+          <FollowAlertPrompt
+            name={profile.display_name}
+            username={profile.username}
+            onDone={() => setAskAlerts(false)}
+          />
+        </BottomSheet>
+      ) : null}
     </View>
   );
 }

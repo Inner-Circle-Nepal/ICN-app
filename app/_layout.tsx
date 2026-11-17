@@ -1,5 +1,5 @@
 import React, { useEffect } from "react";
-import { LogBox, Platform, StyleSheet, View } from "react-native";
+import { AppState, LogBox, Platform, StyleSheet, View } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
@@ -42,7 +42,12 @@ import { ActiveRoomProvider } from "@/features/chautari/ActiveRoom";
 import { PushNudgeProvider } from "@/features/pushNudge/context";
 import { PushNudgeSheet } from "@/features/pushNudge/PushNudgeSheet";
 import { ProfileCompletionGate } from "@/features/profile/ProfileCompletionGate";
-import { extractNotificationPath, syncPushRegistration } from "@/lib/notifications/push";
+import { PushAccountLink } from "@/features/profile/PushAccountLink";
+import {
+  extractNotificationPath,
+  syncPushRegistration,
+  syncPushRegistrationOnResume,
+} from "@/lib/notifications/push";
 import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
 
 LogBox.ignoreLogs(["Invalid DOM property `transform-origin`"]);
@@ -132,9 +137,14 @@ function AppShell() {
 
       // Keep the newsroom's list current: tokens rotate, and an offline opt-in needs retrying.
       void syncPushRegistration();
+      // Coming back to the app also counts as "has been reading" for reminders.
+      const appStateSub = AppState.addEventListener("change", (next) => {
+        if (next === "active") void syncPushRegistrationOnResume();
+      });
       return () => {
         urlSub.remove();
         notifSub.remove();
+        appStateSub.remove();
       };
     }
 
@@ -259,6 +269,7 @@ function AppShell() {
         enforce in the first place.
       */}
       {isClerkConfigured ? <ProfileCompletionGate /> : null}
+      {isClerkConfigured ? <PushAccountLink /> : null}
     </SafeAreaView>
   );
 }
