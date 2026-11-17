@@ -14,11 +14,10 @@ export const SITE_URL = (process.env.EXPO_PUBLIC_SITE_URL ?? "https://icn.news")
 /**
  * Where the Chautari endpoints live.
  *
- * A separate origin from `SITE_URL` on purpose. The public website is hosted
- * independently of the live-audio infrastructure, and the Chautari API runs
- * beside the media server so a join token is minted next to the server that
- * has to honour it. Keeping it a distinct variable means either side can
- * move without the other being rebuilt.
+ * A separate origin from `SITE_URL` on purpose. Today both reach the same
+ * Next.js process on the DigitalOcean droplet; keeping Chautari a distinct
+ * variable means it can move to its own host later without the website (or
+ * the app's other calls) changing.
  *
  * Shares nothing sensitive: these endpoints authenticate the reader's Clerk
  * session and return a short-lived grant. No LiveKit credential is involved

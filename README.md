@@ -1,39 +1,31 @@
-# Inner Circle Nepal — Native Mobile Application (`mobile/`)
+# Inner Circle Nepal — Mobile App
 
-The official Android and iOS React Native application for **Inner Circle Nepal** (`https://icn.news`), built with Expo, TypeScript, Expo Router, and TanStack Query.
+The official Android and iOS app for **Inner Circle Nepal** (`https://icn.news`), built with Expo, TypeScript, Expo Router and TanStack Query.
 
-Designed as a native mobile broadsheet, this application shares the live Supabase database, editorial taxonomy, and design language of the existing Next.js website (`../site/`) while remaining completely isolated in `mobile/`.
-
----
-
-## 1. Technology Stack
-
-- **Runtime & Framework**: React Native `0.88` + Expo SDK `58` (New Architecture enabled)
-- **Language**: TypeScript `6.0` (`strict: true`)
-- **Navigation**: Expo Router (`expo-router`) with file-based routing, custom editorial bottom navigation (`Home`, `Explore`, `Saved`, `Settings`), and universal deep linking (`icn://` and `https://icn.news/{category}/{slug}`)
-- **Server-State & Caching**: TanStack Query v5 (`@tanstack/react-query`)
-- **Forms & Validation**: React Hook Form (`react-hook-form`) + Zod (`zod`) + `@hookform/resolvers`
-- **Media & Typography**:
-  - `expo-image` with memory-disk caching for editorial photography
-  - `@expo-google-fonts/newsreader` (`300Light`, `400Regular`, `400Regular_Italic`, `500Medium`)
-  - `@expo-google-fonts/archivo` (`400Regular`, `500Medium`)
-  - `@expo-google-fonts/mukta` (`400Regular`, `500Medium`) for Devanagari (`नेपाली`)
-- **Persistence & Security**:
-  - `@react-native-async-storage/async-storage` for non-sensitive preferences (`icn-theme`, `icn-lang`, `icn-edition`, `icn-recent-searches`) and lightweight saved bookmarks (`icn-saved-bookmarks-v1`)
-  - `expo-secure-store` for sensitive device push tokens
-- **Notifications**: `expo-notifications` + `expo-device`
+It reads the same Supabase database as the website, and calls the website's API (a separate Next.js repo, `../../site/site`) for anything that needs to know who the reader is: accounts, profiles, follows, and Chautari live audio rooms.
 
 ---
 
-## 2. Quick Start
+## 1. Technology stack
 
-### Prerequisites
-- Node.js 18+ and npm
-- Android Studio (Android emulator) or Xcode (iOS Simulator), or the Expo Go / Expo Development Build client on a physical device
+- **Runtime**: React Native `0.88` + Expo SDK `58` (New Architecture), TypeScript `6.0` (`strict`)
+- **Navigation**: Expo Router, file-based. Five tabs (Home, Newsroom, Chautari, Saved, Settings) under a custom editorial bottom bar. Deep links: `icn://…` and `https://icn.news/{category}/{slug}`
+- **Server state**: TanStack Query v5; the front page, categories and market data are persisted to AsyncStorage so a cold start shows the last edition
+- **Accounts**: Clerk (email one-time code), shared with the website. Public reader profiles live in Supabase (`reader_profiles`)
+- **Live audio**: LiveKit (`livekit-client`, `@livekit/react-native`) for Chautari rooms
+- **Push**: `expo-notifications` through Expo's push service to FCM (Android) and APNs (iOS)
+- **Forms**: React Hook Form + Zod
+- **Media & type**: `expo-image`, `expo-image-picker`; Newsreader and Archivo fonts, Mukta for Devanagari
+- **Storage**: AsyncStorage for preferences and saved stories; `expo-secure-store` for the device push token
+- **Tests**: Vitest
 
-### 1. Install dependencies
+---
+
+## 2. Quick start
+
+### Install
+
 ```bash
-cd mobile
 npm install
 ```
 
@@ -50,108 +42,132 @@ npm install
 > nested copy, so both npm versions agree. Regenerate the lockfile with
 > `npm install` after changing the TypeScript version.
 
-### 2. Configure environment variables
-Copy `.env.example` to `.env` and populate the public client variables (already configured for local development in `.env`):
+Add packages with `npx expo install <pkg>`, never `npm install <pkg>`, so versions match the SDK.
+
+### Environment
+
+Copy `.env.example` to `.env`:
 
 ```env
 EXPO_PUBLIC_SITE_URL=https://icn.news
 EXPO_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
-EXPO_PUBLIC_SUPABASE_ANON_KEY=<your-public-supabase-anon-key>
+EXPO_PUBLIC_SUPABASE_ANON_KEY=<public anon key>
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...        # optional: accounts + Chautari
+EXPO_PUBLIC_CHAUTARI_API_URL=https://api.icn.news
 ```
 
-Use the same project URL and anon key the website reads (`site/.env`). Without
-them the app starts and renders its empty and error states correctly, but no
-stories load.
+Without the Supabase values the app starts and shows its empty states. Without the Clerk key, accounts and Chautari are hidden and reading works as normal.
 
-> **Security Note**: Never place `SUPABASE_SERVICE_ROLE_KEY`, `ADMIN_PASSWORD`, or `VAPID_PRIVATE_KEY` in `mobile/.env`. Everything bundled into a mobile client is public; all mobile reads rely on Supabase Row-Level Security (RLS) public read policies.
+> **Security**: everything in `.env` is compiled into the app and is public. Never put a server secret here (Supabase service role, Clerk secret key, LiveKit API secret, VAPID key). The app asks the website's API for anything that needs one.
 
-### 3. Run the application
+### Run
+
+The app uses native modules (LiveKit, notifications) that Expo Go doesn't include, so develop on a **development build**:
+
 ```bash
-# Start the Expo development server
+# once, or whenever a native dependency changes
+npx eas-cli@latest build --profile development --platform android --local
+adb install build-*.apk
+
+# day to day: JS changes reload from Metro, no rebuild
 npm run start
-
-# Launch on Android emulator / connected Android device
-npm run android
-
-# Launch on iOS Simulator (macOS)
-npm run ios
-
-# Typecheck, lint and test (what `npm run check` runs)
-npm run typecheck
-npm run lint
-npm run test
-npm run check
-
-# Everything except the live-backend test (no network / no .env needed)
-npm run test:offline
-
-# Expo dependency and config diagnostics
-npm run doctor
-
-# Production bundle, without native tooling
-npx expo export --platform android
 ```
 
-### A note on the test suite
+### Check
 
-`tests/liveApi.test.ts` talks to the real Supabase project: it is an
-integration check, not a unit test, and it fails without network access or a
-populated `.env`. Everything else runs offline — use `npm run test:offline`
-in CI if the backend should not be a dependency of the build.
+```bash
+npm run check          # typecheck + lint + tests: run before calling work done
+npm run test:offline   # tests without the live-backend one
+npx vitest run tests/chautariRoom.test.tsx          # one file
+npx vitest run tests/chautariRoom.test.tsx -t "hand" # tests matching a name
+npm run doctor         # expo-doctor
+```
+
+`tests/liveApi.test.ts` talks to the real Supabase project. It needs network and a populated `.env`, and it asserts live data counts that drift as the newsroom publishes. Use `npm run test:offline` when the backend shouldn't be a dependency.
 
 ---
 
-## 3. Project Structure
+## 3. Project structure
 
 ```text
-mobile/
-  app/
-    _layout.tsx            # Root providers, font loader, deep-link listener, BottomNav shell
-    index.tsx              # Editorial Homepage (Lead, Wire, Immigration, Most Read, NEPSE, Forex, Newsletter, Investigations)
-    article/[slug].tsx     # Long-form Article Reading Screen
-    [category]/[slug].tsx  # Canonical website deep-link route (https://icn.news/{category}/{slug})
-    category/[slug].tsx    # Category / Section Screen (including NEPSE Board & Locked Section view)
-    explore.tsx            # Section Directory, Topic Tags, & Interactive Market/Forex Tools
-    search.tsx             # Full-Text Search (Postgres websearch + Devanagari fallback) & Tag Filter
-    bookmarks.tsx          # Offline-persisted Saved Dispatches queue
-    settings.tsx           # Theme, Language (EN/नेपाली), Diaspora Clocks, Push Alerts, Newsletter, & Contact Desk
-  src/
-    components/            # Reusable broadsheet design-system components
-    constants/             # Site identity, diaspora editions, and pagination config
-    features/              # Domain hooks & context (articles, categories, bookmarks, search, market)
-    hooks/                 # Theme & utility hooks
-    lib/
-      api/                 # Supabase client, article queries, NRB forex, YoNEPSE market data, newsletter
-      notifications/       # Push notification permissions, channels, SecureStore token handling
-      query/               # TanStack Query client configuration
-      storage/             # AsyncStorage & SecureStore adapters
-    theme/                 # Broadsheet color palettes, typography tokens, and ThemeProvider
-    types/                 # Strict TypeScript domain models matching supabase/schema.sql
-    utils/                 # HTML-to-native AST parser, deep-link resolver, image sizing, formatters
-  tests/                   # Vitest unit & live Supabase integration test suite
+app/                         Expo Router routes
+  _layout.tsx                Root Stack, providers, fonts, deep links, profile gate, BottomNav
+  (tabs)/                    The five tabs, kept mounted between switches
+    index.tsx                Home: front page
+    explore.tsx              Newsroom: sections, topics, forex and NEPSE tools
+    chautari.tsx             Chautari lobby: live rooms, Coming up, Your rooms
+    bookmarks.tsx            Saved stories (offline)
+    settings.tsx             Theme, language, editions, push alerts, newsletter, contact desk
+  article/[slug].tsx         Article reader (narration, bilingual toggle)
+  [category]/[slug].tsx      Website-URL deep link route
+  category/[slug].tsx        Section page
+  search.tsx                 Full-text search
+  sign-in.tsx                Email + one-time-code sign-in / sign-up
+  profile.tsx                Edit your profile (name, bio, picture)
+  profile/complete.tsx       Mandatory profile setup after first sign-in
+  user/[username].tsx        A reader's public profile, follow button
+  chautari/[slug].tsx        A room: live room, or waiting room if scheduled
+  chautari/new.tsx           Open or schedule a room (cover photo, moderators)
+  chautari/mine.tsx          Rooms you host or moderate
+  chautari/earn.tsx          Earning programme
+src/
+  components/                Design-system components; chautari/ holds room UI
+  features/                  Domain hooks and providers (articles, chautari, profile, pushNudge, …)
+  lib/api/                   Supabase queries and API clients (chautari, readerProfile, pushRegistry, …)
+  lib/livekit/               LiveKit platform seam (native vs web) and background audio
+  lib/notifications/         Push permission, channels, token, tapped-notification routing
+  lib/query/                 Query client and persistence
+  lib/storage/               AsyncStorage / SecureStore adapters
+  theme/, types/, utils/
+modules/chautari-audio-service   Local native module for background room audio (Android)
+plugins/                     Expo config plugins
+supabase/                    App-owned migrations and push Edge Functions (see §6)
+tests/                       Vitest suite
 ```
 
 ---
 
-## 4. What the backend actually provides
+## 4. Accounts and profiles
 
-Checked against the live project rather than assumed, so the app does not
-promise more than the data supports:
+Sign-in is Clerk with an emailed one-time code; the Clerk application is shared with the website, so one account works in both. Clerk proves who the reader is. Their **public identity** is a row in Supabase `reader_profiles`: a unique @username, display name, bio and avatar URL.
 
-| Area | State |
-| --- | --- |
-| `articles`, `categories`, `authors`, `tags`, `forex_rates` | Readable with the anon key under RLS |
-| Published stories | 284, all with a category |
-| `authors` | **No published story has an author.** Bylines fall back to "Inner Circle Nepal newsroom" and the reporter bio block is hidden |
-| `body_ne`, `search_vector_ne` | **Columns do not exist** — `supabase/2026-10-nepali-bodies.sql` and `2026-10-nepali-search.sql` are unapplied. The data layer detects `42703` and falls back, so Nepali bodies and Nepali full-text search are unavailable until they are run |
-| `title_ne` / `excerpt_ne` | Present on 14 of 284 stories; the bilingual toggle appears only on those |
-| `increment_article_views` RPC | Works from the anon key |
-| Supabase image transforms (`/render/image/`) | Enabled — used to size photography per view |
-| Push notifications | Permissions, Android channel and SecureStore token handling are implemented. The website backend sends **Web Push only**; there is no Expo/FCM/APNs sender, so no remote push is actually delivered to this app yet |
+- After signing in, a reader without a profile is sent to a one-step setup screen (username + display name) before the app opens. Readers who were already signed in hit the same screen on their next launch.
+- Profiles and follows, reads and writes, go through the website's API (`/api/reader/*`), which verifies the Clerk session for writes. The tables are publicly readable in Supabase, but the app doesn't query them directly.
+- Profile pictures are uploaded to Clerk's CDN and the URL is mirrored into `reader_profiles.avatar_url`, so other readers can see them. Anyone without a picture is shown with initials.
 
 ---
 
-## 5. Listening to a story
+## 5. Chautari (live audio rooms)
+
+Clubhouse-style audio rooms on LiveKit.
+
+- **Joining**: the app asks the website for a short-lived join token. The server decides the reader's role from its database, and the microphone permission is part of the signed token, so the app can't grant itself one.
+- **In a room**: a stage of speakers and a grid of listeners. Avatars show who is speaking, muted, or has a hand raised. Tap anyone for their profile, Follow, and (for the host and moderators) Invite to stage, Move to audience, Mute, Make moderator, Remove. Everyone can Block or Report. The bottom bar holds Leave, the microphone or raise-hand button, and a raised-hands queue for hosts and moderators.
+- **Moderators**: the host can make anyone a moderator, mid-room or when creating the room. Moderators have the host's controls but can't act on the host.
+- **Scheduling**: rooms can be opened now or booked up to 30 days ahead (Kathmandu time). A booked room shows a waiting room with a countdown; the host or an assigned moderator taps **Go live**. Bookings nobody starts drop off three hours after their time.
+- **Cover photos**: an optional banner per room, resized by the website before storage.
+- **Staying in the room**: the connection is held by `ActiveRoomProvider`, so leaving the screen keeps the audio going (a mini bar shows the room), including with the phone locked.
+- **Lobby**: live rooms as cover cards, a "Coming up" row of scheduled rooms, and "Your rooms". The Chautari tab icon animates while any room is live.
+
+---
+
+## 6. Push notifications
+
+Phones that turn alerts on register an Expo push token in Supabase (`mobile_push_tokens`). Senders are Supabase Edge Functions in `supabase/functions/`:
+
+| Notification | Sent when | Function |
+|---|---|---|
+| Breaking news | A story is published as breaking | `send-breaking-push` (database webhook) |
+| Chautari live | A room goes live, including a scheduled one starting | `send-chautari-live-push` (database webhook) |
+| Weekly reminder | Tue / Thu / Sat, 08:00 Nepal time | `send-reminder-push` (`pg_cron`) |
+
+Each type has its own switch in Settings (Chautari and reminders require breaking-news alerts to be on). Readers are invited to turn alerts on with a soft ask before the system prompt: a dot on the Settings tab and a one-time sheet after they've read a few stories or joined a room.
+
+Setup for the database, functions and webhooks is in `supabase/README.md`. Migrations are applied by hand in the Supabase SQL editor.
+
+---
+
+## 7. Listening to a story
 
 Articles can be read aloud from the byline bar. It uses the **device's own
 speech engine** (`expo-speech`), not a speech API: free, offline, no audio to
@@ -166,14 +182,21 @@ the current sentence; that is deliberate and commented in
 
 ---
 
-## 6. Known gaps
+## 8. Releasing
 
-- No automated coverage of screen rendering — the suite covers data, parsing,
-  storage and navigation logic. Component tests would need a React Native
-  renderer, which is not configured.
-- `settings.tsx` is large (≈900 lines) and mixes appearance preferences,
-  notification handling and the contact form.
-- Offline behaviour is in-memory only: TanStack Query's cache is not persisted
-  across launches, so a cold start with no network shows error states rather
-  than yesterday's edition. Saved stories **are** on-device and do render
-  offline.
+- Bump `expo.version` in `app.json`. Build numbers are tracked and incremented by EAS (`appVersionSource: remote`).
+- `npx eas-cli@latest build --profile production --platform android|ios`
+- iOS: `npx eas-cli@latest submit --profile production --platform ios`, then TestFlight and App Store review in App Store Connect.
+- Android: upload the `.aab` from the EAS build page in Play Console (Production or a testing track).
+- Ship backend changes first: database migrations, then the website deploy, then the app.
+
+---
+
+## 9. Known gaps
+
+- Data notes from the original build, worth re-checking: no published story has an author (bylines fall back to the newsroom), and the Nepali-body and Nepali-search migrations (`2026-10-nepali-bodies.sql`, `2026-10-nepali-search.sql`) were unapplied; the data layer falls back when those columns are missing.
+- No component rendering tests: the suite covers data, parsing, state machines and API clients. Vitest can't load React Native, so screens aren't rendered in tests.
+- `app/(tabs)/settings.tsx` and `app/chautari/[slug].tsx` are large and mix several concerns.
+- Follows have no lists or search yet; the way to reach someone's profile is from a Chautari room.
+- "Remind me" for scheduled rooms and follower-based Chautari notifications are planned together as a notifications overhaul.
+- iOS push is configured but has not been verified on a device.
