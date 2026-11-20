@@ -115,6 +115,18 @@ export default function CategoryScreen() {
             onRetry={() => void handleRefresh()}
           />
         </View>
+      ) : categoryQuery.isSuccess && !category && allArticles.length === 0 ? (
+        // The category list loaded and has no such section: an old or
+        // mistyped link, or a section the newsroom renamed.
+        <View style={styles.centeredWrap}>
+          <EmptyState
+            kicker="Section not found"
+            title="This section doesn't exist"
+            description="It may have been renamed or removed. Every story is still on the front page."
+            actionLabel="Back to Front Page"
+            onAction={() => router.replace("/")}
+          />
+        </View>
       ) : category?.is_locked && allArticles.length === 0 ? (
         <LockedCategoryView
           name={

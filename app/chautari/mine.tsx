@@ -27,7 +27,7 @@ export default function MyRoomsScreen() {
 function MyRoomsUnavailable() {
   const router = useRouter();
   return (
-    <Frame onBack={() => router.back()}>
+    <Frame onBack={() => (router.canGoBack() ? router.back() : router.replace("/chautari"))}>
       <ErrorState title="Rooms are unavailable" message="This build has no account system." />
     </Frame>
   );

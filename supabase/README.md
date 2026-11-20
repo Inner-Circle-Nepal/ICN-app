@@ -1,5 +1,11 @@
 # Mobile breaking-news push — Supabase setup
 
+> **Folders.** `legacy-migrations/` is the SQL that was applied to production by
+> hand, in order; the steps below refer to it. `migrations/`, `config.toml`,
+> `seed.sql`, `seed/` and `scripts/` build the **local** test copy
+> (`npx supabase start` / `db reset`; see "Local backend" in `../CLAUDE.md`)
+> and are never pushed to production.
+
 The app registers each phone that turns on **Settings → Breaking News Push
 Alerts**. When a story is published with **Breaking** ticked, every registered
 phone gets an alert that opens the story.
@@ -15,7 +21,7 @@ so no Apple setup is needed here.
 ## 1. Database (once)
 
 Supabase dashboard → **SQL Editor** → paste and run
-[`migrations/20261030_mobile_push.sql`](migrations/20261030_mobile_push.sql).
+[`legacy-migrations/20261030_mobile_push.sql`](legacy-migrations/20261030_mobile_push.sql).
 
 It creates `mobile_push_tokens`, `mobile_push_log` and two functions. Phones
 can add or remove only their own token and cannot read the list.
@@ -69,11 +75,11 @@ A story is alerted at most once, however often it is edited afterwards.
 
 Run the SQL in this order in the SQL editor (each is safe to re-run):
 
-1. `migrations/20261118_reader_profile_search.sql`: people search.
-2. `migrations/20261118_push_accounts.sql`: `clerk_user_id` and
+1. `legacy-migrations/20261118_reader_profile_search.sql`: people search.
+2. `legacy-migrations/20261118_push_accounts.sql`: `clerk_user_id` and
    `breaking_enabled` on `mobile_push_tokens`; registration takes a breaking flag.
-3. `migrations/20261118_follow_alerts.sql`: `user_follows.notify`.
-4. `migrations/20261118_reminder_throttle.sql`: `last_reminded_at`.
+3. `legacy-migrations/20261118_follow_alerts.sql`: `user_follows.notify`.
+4. `legacy-migrations/20261118_reminder_throttle.sql`: `last_reminded_at`.
 5. Site repo `supabase/2026-11-chautari-invites.sql`: `chautari_invites`.
 
 Deploy the senders (all `--no-verify-jwt`, same `WEBHOOK_SECRET`):

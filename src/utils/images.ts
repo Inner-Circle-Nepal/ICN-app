@@ -1,4 +1,4 @@
-import { SUPABASE_URL } from "@/constants/config";
+import { STORAGE_URL } from "@/constants/config";
 
 /**
  * Right-sized image delivery for story photography.
@@ -74,7 +74,7 @@ const QUALITY_FOR: Record<ImageWidth, number> = {
 
 function storageHost(): string | null {
   try {
-    return SUPABASE_URL ? new URL(SUPABASE_URL).host.toLowerCase() : null;
+    return STORAGE_URL ? new URL(STORAGE_URL).host.toLowerCase() : null;
   } catch {
     return null;
   }

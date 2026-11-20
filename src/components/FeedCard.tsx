@@ -115,17 +115,23 @@ function FeedCardInner({ article, height }: FeedCardProps) {
         </Text>
       </View>
 
-      {/* Middle: the photograph, centred in the page. */}
+      {/* Middle: the whole photograph, never cropped. Photos are chosen for
+          the website's wide frames, so filling this taller box would cut off
+          their sides; the gaps show the blurred copy behind instead. */}
       <View style={styles.middle}>
-        <View style={[styles.photo, { maxHeight: height * 0.46, backgroundColor: palette.paper2 }]}>
+        <View
+          style={[
+            styles.photo,
+            { maxHeight: height * 0.46, backgroundColor: uri ? "transparent" : palette.paper2 },
+          ]}
+        >
           {uri ? (
             <Image
               source={{ uri }}
               placeholder={{ uri: placeholderImageUrl(article.hero_image) }}
-              placeholderContentFit="cover"
+              placeholderContentFit="contain"
               style={StyleSheet.absoluteFill}
-              contentFit="cover"
-              contentPosition="center"
+              contentFit="contain"
               transition={150}
               cachePolicy="memory-disk"
               recyclingKey={article.slug}

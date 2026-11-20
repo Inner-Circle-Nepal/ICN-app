@@ -47,6 +47,7 @@ import { InviteSheet } from "@/components/chautari/InviteSheet";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
 import { useMyProfile } from "@/features/profile/useMyProfile";
+import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 
 /**
@@ -96,6 +97,7 @@ const noop = () => {};
 const IDLE_ROOM: ChautariRoomState = {
   phase: "idle",
   error: null,
+  errorReason: null,
   endReason: null,
   identity: null,
   role: null,
@@ -111,6 +113,24 @@ const IDLE_ROOM: ChautariRoomState = {
   toggleMic: noop,
   retry: noop,
   setBlocked: noop,
+};
+
+function isRoomNotFound(e: unknown): boolean {
+  return e instanceof ChautariError && e.reason === "room_not_found";
+}
+
+/**
+ * Join refusals from `POST /token` (see CLAUDE.md, Chautari: Joining). The
+ * server's message is the description; `retry` is whether trying again could
+ * work. Reasons not listed here are treated as connection problems.
+ */
+const JOIN_REFUSALS: Record<string, { kicker: string; title: string; retry: boolean }> = {
+  room_not_found: { kicker: "Room not found", title: "This room doesn't exist", retry: false },
+  room_ended: { kicker: "Room closed", title: "This conversation has ended", retry: false },
+  room_not_started: { kicker: "Not live yet", title: "This room hasn't started", retry: true },
+  room_full: { kicker: "Room full", title: "This room is full", retry: true },
+  removed_from_room: { kicker: "Chautari", title: "You can't rejoin this room", retry: false },
+  not_signed_in: { kicker: "Chautari", title: "Sign in to join", retry: true },
 };
 
 /**
@@ -137,9 +157,10 @@ function ChautariUnavailable() {
   };
   return (
     <Shell onBack={back} onShare={null} title="Chautari">
-      <ErrorState
+      <EmptyState
+        kicker="Chautari"
         title="Conversations are unavailable"
-        message="This build has no account system configured."
+        description="This build has no account system configured."
       />
     </Shell>
   );
@@ -221,15 +242,17 @@ function ChautariRoomScreenActive() {
     queryKey: ["chautari-room", slug, Boolean(isSignedIn)],
     queryFn: () => getRoomDetails(slug, isSignedIn ? getToken : undefined),
     enabled: Boolean(slug),
-    retry: 1,
+    // A missing room is an answer, not a failure: no point asking again.
+    retry: (count, e) => count < 1 && !isRoomNotFound(e),
     refetchInterval: (q) => (q.state.data?.room.status === "scheduled" ? 20_000 : false),
   });
   const roomDetails = details.data?.room ?? null;
+  const missing = !alreadyHere && isRoomNotFound(details.error);
   const waiting = !alreadyHere && roomDetails?.status === "scheduled";
   const lapsed = !alreadyHere && roomDetails?.status === "ended";
   // Do not join until we know the room is live. An older server without the
   // details endpoint errors here, and the join goes ahead as before.
-  const readyToJoin = alreadyHere || (!details.isLoading && !waiting && !lapsed);
+  const readyToJoin = alreadyHere || (!details.isLoading && !missing && !waiting && !lapsed);
 
   useEffect(() => {
     if (!liveAudioSupported || !isSignedIn || !slug || !readyToJoin) return;
@@ -480,6 +503,22 @@ function ChautariRoomScreenActive() {
 
   /* ------------------------------------------------------------ gating */
 
+  // An old, mistyped or invented link (a shared URL, a notification for a
+  // room that was since deleted). Checked first: signing in won't help.
+  if (missing || !slug) {
+    return (
+      <Shell onBack={goBack} onShare={null} title="Chautari">
+        <EmptyState
+          kicker="Room not found"
+          title="This room doesn't exist"
+          description="The link may be mistyped, or the room may have been removed."
+          actionLabel="See all rooms"
+          onAction={() => router.replace("/chautari")}
+        />
+      </Shell>
+    );
+  }
+
   if (waiting && roomDetails) {
     const goLive = () => {
       const startEarly =
@@ -548,10 +587,12 @@ function ChautariRoomScreenActive() {
   if (lapsed) {
     return (
       <Shell onBack={goBack} onShare={null} title={title}>
-        <ErrorState
+        <EmptyState
+          kicker="Room closed"
           title="This room did not go ahead"
-          message="It was scheduled, but nobody started it, or it was cancelled."
-          onRetry={() => router.replace("/chautari")}
+          description="It was scheduled, but nobody started it, or it was cancelled."
+          actionLabel="See all rooms"
+          onAction={() => router.replace("/chautari")}
         />
       </Shell>
     );
@@ -560,9 +601,10 @@ function ChautariRoomScreenActive() {
   if (!liveAudioSupported) {
     return (
       <Shell onBack={back} onShare={null} title={title}>
-        <ErrorState
+        <EmptyState
+          kicker="Chautari"
           title="Live audio needs the full app"
-          message="This preview build cannot play live conversations. Install Inner Circle Nepal from the app store to listen."
+          description="This preview build cannot play live conversations. Install Inner Circle Nepal from the app store to listen."
         />
       </Shell>
     );
@@ -571,10 +613,12 @@ function ChautariRoomScreenActive() {
   if (!isSignedIn) {
     return (
       <Shell onBack={back} onShare={null} title={title}>
-        <ErrorState
+        <EmptyState
+          kicker="Chautari"
           title="Sign in to join"
-          message="Chautari rooms are open to readers with an account. Listening is free."
-          onRetry={() => router.push("/sign-in")}
+          description="Chautari rooms are open to readers with an account. Listening is free."
+          actionLabel="Sign in"
+          onAction={() => router.push("/sign-in")}
         />
       </Shell>
     );
@@ -585,13 +629,26 @@ function ChautariRoomScreenActive() {
   }
 
   if (room.phase === "error") {
+    // The server said no (full, removed, ended…): its message, and a way on
+    // that fits. Anything else was the network: retry.
+    const refusal = JOIN_REFUSALS[room.errorReason ?? ""];
     return (
       <Shell onBack={back} onShare={null} title={title}>
-        <ErrorState
-          title="Could not join"
-          message={room.error ?? "Please try again."}
-          onRetry={room.retry}
-        />
+        {refusal ? (
+          <EmptyState
+            kicker={refusal.kicker}
+            title={refusal.title}
+            description={room.error ?? ""}
+            actionLabel={refusal.retry ? "Try again" : "See all rooms"}
+            onAction={refusal.retry ? room.retry : () => router.replace("/chautari")}
+          />
+        ) : (
+          <ErrorState
+            title="Could not join"
+            message={room.error ?? "Please try again."}
+            onRetry={room.retry}
+          />
+        )}
       </Shell>
     );
   }
@@ -600,15 +657,25 @@ function ChautariRoomScreenActive() {
     const copy = END_MESSAGES[room.endReason ?? "unknown"];
     return (
       <Shell onBack={back} onShare={null} title={title}>
-        <ErrorState
-          title={copy.title}
-          message={copy.message}
-          onRetry={
-            room.endReason === "connection_lost" || room.endReason === "joined_elsewhere"
-              ? room.retry
-              : () => router.replace("/chautari")
-          }
-        />
+        {room.endReason === "connection_lost" ? (
+          <ErrorState title={copy.title} message={copy.message} onRetry={room.retry} />
+        ) : room.endReason === "joined_elsewhere" ? (
+          <EmptyState
+            kicker="Chautari"
+            title={copy.title}
+            description={copy.message}
+            actionLabel="Rejoin here"
+            onAction={room.retry}
+          />
+        ) : (
+          <EmptyState
+            kicker="Room closed"
+            title={copy.title}
+            description={copy.message}
+            actionLabel="See all rooms"
+            onAction={() => router.replace("/chautari")}
+          />
+        )}
       </Shell>
     );
   }

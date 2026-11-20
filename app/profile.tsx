@@ -28,6 +28,7 @@ import {
 } from "@/features/profile/validators";
 import { releasePushToken } from "@/features/profile/PushAccountLink";
 import { Avatar } from "@/components/chautari/Avatar";
+import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
@@ -91,7 +92,12 @@ function ProfileScreenActive() {
   const insets = useSafeAreaInsets();
   const { isSignedIn, isLoaded, signOut, getToken } = useAuth();
   const { user } = useUser();
-  const { profile, isLoading: profileLoading } = useMyProfile();
+  const {
+    profile,
+    isLoading: profileLoading,
+    isError: profileError,
+    refetch: refetchProfile,
+  } = useMyProfile();
   const update = useUpdateMyProfile();
 
   /*
@@ -358,14 +364,29 @@ function ProfileScreenActive() {
     );
   }
 
-  // Signed in but no profile row yet — the pre-PR-6 window. After PR 6 ships,
-  // the route guard in `_layout.tsx` catches this earlier.
-  if (!profile) {
+  if (!profile && profileError) {
     return (
       <Shell onBack={back}>
         <ErrorState
+          title="Could not load your profile"
+          message="Check your connection and try again."
+          onRetry={() => void refetchProfile()}
+        />
+      </Shell>
+    );
+  }
+
+  // Signed in with no profile row: the gate in `_layout.tsx` normally sends
+  // the reader to completion first; this covers the moment before it does.
+  if (!profile) {
+    return (
+      <Shell onBack={back}>
+        <EmptyState
+          kicker="Almost there"
           title="Finish setting up your profile"
-          message="You're signed in but your reader profile isn't complete yet. Update the app and sign in again to finish signup."
+          description="Choose a username and the name other readers will see."
+          actionLabel="Set up profile"
+          onAction={() => router.replace("/profile/complete")}
         />
       </Shell>
     );

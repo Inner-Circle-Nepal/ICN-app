@@ -73,6 +73,20 @@ adb install build-*.apk
 npm run start
 ```
 
+### Run against a local backend
+
+To test pushes, rooms and follows without touching production, run Supabase, the website and LiveKit on this laptop and point the app at them. Setup is described in `CLAUDE.md` ("Local backend"). Day to day:
+
+```bash
+npx supabase start                 # local Supabase (Docker)
+# in the site repo: npm run dev, and the LiveKit container in infra/livekit/local/
+npm run start:local                # Metro with local-backend.env
+npm run adb:reverse                # phone → laptop over USB; re-run after replugging
+npm run bots -- live sita "Title"  # a bot goes live; its followers get the push
+```
+
+`npm run start` switches back to production. `local-backend.env` holds the local addresses and is never committed or uploaded to EAS.
+
 ### Check
 
 ```bash
@@ -91,7 +105,9 @@ npm run doctor         # expo-doctor
 
 ```text
 app/                         Expo Router routes
-  _layout.tsx                Root Stack, providers, fonts, deep links, profile gate, BottomNav
+  _layout.tsx                Root Stack, providers, fonts, notification taps, profile gate, BottomNav
+  +native-intent.tsx         Every link the OS opens the app with: icn.news paths → app screens
+  +not-found.tsx             Catch-all for paths no screen matches
   (tabs)/                    The five tabs, kept mounted between switches
     index.tsx                Home: front page
     explore.tsx              Newsroom: sections, topics, forex and NEPSE tools
@@ -121,7 +137,8 @@ src/
   theme/, types/, utils/
 modules/chautari-audio-service   Local native module for background room audio (Android)
 plugins/                     Expo config plugins
-supabase/                    App-owned migrations and push Edge Functions (see §6)
+supabase/                    Push Edge Functions, the local test stack (config, baseline, seed, scripts),
+                             and the hand-applied history in legacy-migrations/ (see §6)
 tests/                       Vitest suite
 ```
 
@@ -163,7 +180,7 @@ Phones that turn alerts on register an Expo push token in Supabase (`mobile_push
 
 Each type has its own switch in Settings (Chautari and reminders require breaking-news alerts to be on). Readers are invited to turn alerts on with a soft ask before the system prompt: a dot on the Settings tab and a one-time sheet after they've read a few stories or joined a room.
 
-Setup for the database, functions and webhooks is in `supabase/README.md`. Migrations are applied by hand in the Supabase SQL editor.
+Setup for the database, functions and webhooks is in `supabase/README.md`. Production migrations are applied by hand in the Supabase SQL editor; `supabase/migrations/` only builds the local test database.
 
 ---
 
@@ -189,6 +206,7 @@ the current sentence; that is deliberate and commented in
 - iOS: `npx eas-cli@latest submit --profile production --platform ios`, then TestFlight and App Store review in App Store Connect.
 - Android: upload the `.aab` from the EAS build page in Play Console (Production or a testing track).
 - Ship backend changes first: database migrations, then the website deploy, then the app.
+- App Links / Universal Links: publish or change the site's `public/.well-known/` files only after the app version that handles those links is live in both stores.
 
 ---
 

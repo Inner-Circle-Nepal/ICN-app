@@ -11,6 +11,7 @@ expo-env.d.ts
 
 # Local `eas build --local` output — large APKs that belong on a device, not in git.
 build-*.apk
+build-*.aab
 
 # Native
 .kotlin/
@@ -52,6 +53,7 @@ yarn-error.*
 # local env files (never commit real keys)
 .env
 .env*.local
+local-backend.env
 
 # typescript
 *.tsbuildinfo

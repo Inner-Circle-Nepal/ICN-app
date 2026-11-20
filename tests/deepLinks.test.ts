@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
+import { deepLinkToRouterPath, resolveDeepLink, systemLinkTarget } from "@/utils/deepLinks";
 
 describe("deepLinks", () => {
   it("resolves canonical website article URLs to in-app article routes", () => {
@@ -43,5 +43,46 @@ describe("deepLinks", () => {
       url: "https://www.nrb.org.np/forex",
     });
     expect(resolved && deepLinkToRouterPath(resolved)).toBeNull();
+  });
+
+  it("opens Chautari rooms from push paths and website links", () => {
+    // The exact `path` send-chautari-live-push and send-chautari-invite-push send.
+    const fromPush = resolveDeepLink("/chautari/morning-markets-967ns");
+    expect(fromPush).toEqual({ type: "chautari", slug: "morning-markets-967ns" });
+    expect(fromPush && deepLinkToRouterPath(fromPush)).toBe("/chautari/morning-markets-967ns");
+
+    const fromSite = resolveDeepLink("https://icn.news/chautari/morning-markets-967ns");
+    expect(fromSite && deepLinkToRouterPath(fromSite)).toBe("/chautari/morning-markets-967ns");
+
+    const tab = resolveDeepLink("https://icn.news/chautari");
+    expect(tab && deepLinkToRouterPath(tab)).toBe("/chautari");
+  });
+
+  describe("systemLinkTarget (links the OS opens the app with)", () => {
+    it("routes shared stories and rooms to their screens", () => {
+      expect(systemLinkTarget("https://icn.news/nepse/hydropower-ipo-rules")).toEqual({
+        kind: "route",
+        path: "/article/hydropower-ipo-rules",
+      });
+      expect(systemLinkTarget("https://icn.news/chautari/link-test-u9zln")).toEqual({
+        kind: "route",
+        path: "/chautari/link-test-u9zln",
+      });
+    });
+
+    it("sends website pages the app doesn't have to the browser", () => {
+      const target = systemLinkTarget("https://icn.news/privacy");
+      expect(target.kind).toBe("browser");
+      expect(target.kind === "browser" && target.url.endsWith("/privacy")).toBe(true);
+    });
+
+    it("leaves app-scheme, dev-client and other-domain links to Expo Router", () => {
+      expect(systemLinkTarget("icn://chautari/abc")).toEqual({ kind: "passthrough" });
+      expect(
+        systemLinkTarget("exp+inner-circle-nepal://expo-development-client/?url=http%3A%2F%2F10.0.0.2%3A8081"),
+      ).toEqual({ kind: "passthrough" });
+      expect(systemLinkTarget("https://example.com/nepal/story")).toEqual({ kind: "passthrough" });
+      expect(systemLinkTarget("/chautari/abc")).toEqual({ kind: "passthrough" });
+    });
   });
 });

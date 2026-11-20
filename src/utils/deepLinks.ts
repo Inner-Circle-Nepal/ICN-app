@@ -29,6 +29,7 @@ const RESERVED_TOP_SEGMENTS = new Set([
   "settings",
   "article",
   "category",
+  "chautari",
 ]);
 
 export type ResolvedDeepLink =
@@ -39,6 +40,7 @@ export type ResolvedDeepLink =
   | { type: "bookmarks" }
   | { type: "settings" }
   | { type: "explore" }
+  | { type: "chautari"; slug?: string }
   | { type: "external"; url: string };
 
 const KNOWN_HOSTS = new Set([
@@ -122,6 +124,13 @@ function resolvePathAndQuery(pathWithQuery: string): ResolvedDeepLink {
     return { type: "category", slug: second };
   }
 
+  // Chautari rooms: the path every Chautari push carries (`/chautari/<slug>`),
+  // and the website's room pages. Without this it read as `/{category}/{slug}`
+  // and opened a missing article.
+  if (first === "chautari") {
+    return { type: "chautari", slug: second };
+  }
+
   // Website pagination: `/{category}/page/{n}`
   if (second === "page" && third && !RESERVED_TOP_SEGMENTS.has(first)) {
     return { type: "category", slug: first };
@@ -138,6 +147,37 @@ function resolvePathAndQuery(pathWithQuery: string): ResolvedDeepLink {
   }
 
   return { type: "external", url: `${site.url}${pathWithQuery.startsWith("/") ? "" : "/"}${pathWithQuery}` };
+}
+
+/**
+ * Where a link the operating system hands the app should go (App Links from
+ * WhatsApp, a browser, an email). Pure, so it is testable; used by
+ * app/+native-intent.tsx.
+ *
+ * Only icn.news web links are rewritten: `/{category}/{slug}` becomes the
+ * article screen, and a page the app doesn't have (privacy, unsubscribe, …)
+ * is opened in a browser tab instead of a dead "Unmatched Route" screen.
+ * Everything else (icn:// links, Expo's own dev-client links) passes through
+ * to Expo Router untouched.
+ */
+export type SystemLinkTarget =
+  | { kind: "route"; path: string }
+  | { kind: "browser"; url: string }
+  | { kind: "passthrough" };
+
+export function systemLinkTarget(rawUrl: string): SystemLinkTarget {
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    return { kind: "passthrough" };
+  }
+  const web = parsed.protocol === "https:" || parsed.protocol === "http:";
+  if (!web || !KNOWN_HOSTS.has(parsed.hostname.toLowerCase())) return { kind: "passthrough" };
+
+  const resolved = resolvePathAndQuery(`${parsed.pathname}${parsed.search}`);
+  if (resolved.type === "external") return { kind: "browser", url: resolved.url };
+  return { kind: "route", path: deepLinkToRouterPath(resolved) ?? "/" };
 }
 
 /** Converts a resolved deep link into an Expo Router path string. */
@@ -159,6 +199,8 @@ export function deepLinkToRouterPath(resolved: ResolvedDeepLink): string | null 
       return "/settings";
     case "explore":
       return "/explore";
+    case "chautari":
+      return resolved.slug ? `/chautari/${encodeURIComponent(resolved.slug)}` : "/chautari";
     case "external":
       return null;
   }

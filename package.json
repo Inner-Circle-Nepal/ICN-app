@@ -62,7 +62,10 @@
     "typescript": "$typescript"
   },
   "scripts": {
-    "start": "expo start",
+    "start": "rm -f .env.development.local && expo start",
+    "start:local": "cp local-backend.env .env.development.local && expo start --clear",
+    "bots": "bash supabase/scripts/bots.sh",
+    "adb:reverse": "adb reverse tcp:8081 tcp:8081 && adb reverse tcp:54321 tcp:54321 && adb reverse tcp:3001 tcp:3001 && adb reverse tcp:7880 tcp:7880 && adb reverse tcp:7881 tcp:7881",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "web": "expo start --web",

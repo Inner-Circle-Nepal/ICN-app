@@ -28,6 +28,8 @@ export const MY_PROFILE_KEY = ["readerProfile", "me"] as const;
 export type UseMyProfileResult = {
   profile: ReaderProfile | null;
   isLoading: boolean;
+  /** The request failed and there is no cached profile to show. */
+  isError: boolean;
   isSignedIn: boolean;
   /** True iff signed in AND the server returned 404 for /profile/me. */
   needsCompletion: boolean;
@@ -50,13 +52,16 @@ export function useMyProfile(): UseMyProfileResult {
 
   const profile = query.data ?? null;
   const signedIn = !!isSignedIn;
-  const resolved = signedIn && !query.isLoading;
 
   return {
     profile,
     isLoading: signedIn && query.isLoading,
+    isError: signedIn && query.isError && profile === null,
     isSignedIn: signedIn,
-    needsCompletion: resolved && profile === null,
+    // Only the server's answer "no profile" (404 → null) counts. A failed
+    // request (offline, timeout, 5xx) also leaves `data` empty, and must not
+    // send a reader who has a profile to the signup screen.
+    needsCompletion: signedIn && query.isSuccess && query.data === null,
     refetch: query.refetch,
   };
 }

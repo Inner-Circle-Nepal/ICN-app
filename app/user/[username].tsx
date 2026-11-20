@@ -13,6 +13,7 @@ import Svg, { Path } from "react-native-svg";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
 import { Avatar } from "@/components/chautari/Avatar";
+import { ErrorState } from "@/components/ErrorState";
 import { useProfile } from "@/features/profile/useProfile";
 import { useFollowMutation, useFollowStatus, useUnfollowMutation } from "@/features/profile/useFollow";
 import { ReaderApiError } from "@/lib/api/readerProfile";
@@ -73,7 +74,7 @@ export default function PublicProfileScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         {/* Back bar */}
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => (router.canGoBack() ? router.back() : router.replace("/"))}
           style={styles.backBtn}
           accessibilityRole="button"
           accessibilityLabel="Back"
@@ -94,6 +95,12 @@ export default function PublicProfileScreen() {
           <View style={styles.loading}>
             <ActivityIndicator color={palette.ink} />
           </View>
+        ) : profileQuery.isError && !profile ? (
+          <ErrorState
+            title="Could not load this profile"
+            message="Check your connection and try again."
+            onRetry={() => void profileQuery.refetch()}
+          />
         ) : !profile ? (
           <View style={styles.missing}>
             <Text style={[styles.kicker, { color: palette.quiet }]}>Not found</Text>

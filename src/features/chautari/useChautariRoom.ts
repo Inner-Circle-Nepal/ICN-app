@@ -85,6 +85,12 @@ export interface RoomIdentity {
 export interface ChautariRoomState {
   phase: RoomPhase;
   error: string | null;
+  /**
+   * Why the join failed, while `phase` is "error": the server's refusal
+   * `reason` (`room_full`, `removed_from_room`, …), or `offline` / `timeout`
+   * / `connection` when the network was the problem.
+   */
+  errorReason: string | null;
   endReason: EndReason | null;
   /**
    * The room the server actually let us into. Null until the grant arrives.
@@ -264,6 +270,7 @@ export function useChautariRoom(
 ): ChautariRoomState {
   const [phase, setPhase] = useState<RoomPhase>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [errorReason, setErrorReason] = useState<string | null>(null);
   const [endReason, setEndReason] = useState<EndReason | null>(null);
   const [identity, setIdentity] = useState<RoomIdentity | null>(null);
   const [role, setRole] = useState<RoomRole | null>(null);
@@ -500,6 +507,7 @@ export function useChautariRoom(
             ? e.message
             : "Could not connect to this room. Please try again.";
         setError(message);
+        setErrorReason(e instanceof ChautariError ? e.reason : "connection");
         setPhaseSafely("error");
         void teardown();
       }
@@ -587,6 +595,7 @@ export function useChautariRoom(
   return {
     phase,
     error,
+    errorReason,
     endReason,
     identity,
     role,

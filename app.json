@@ -3,7 +3,7 @@
     "name": "Inner Circle Nepal",
     "slug": "inner-circle-nepal",
     "scheme": "icn",
-    "version": "1.1.0",
+    "version": "1.2.1",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -40,7 +40,47 @@
             {
               "scheme": "https",
               "host": "icn.news",
-              "pathPrefix": "/"
+              "pathPrefix": "/chautari/"
+            },
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/nepal/"
+            },
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/investigations/"
+            },
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/diaspora/"
+            },
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/immigration/"
+            },
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/nepse/"
+            },
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/technology/"
+            },
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/culture/"
+            },
+            {
+              "scheme": "https",
+              "host": "icn.news",
+              "pathPrefix": "/sports/"
             }
           ],
           "category": [

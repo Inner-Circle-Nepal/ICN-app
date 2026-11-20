@@ -27,6 +27,7 @@ Run lint and typecheck before declaring any task done.
 
 - Use **Expo Router** for all navigation. Routes live in `app/` at the repo root — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) in `src/`, outside `app/`.
 - Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
+- Links the operating system opens the app with (shared `https://icn.news/...` links, `icn://`) are translated to routes in `app/+native-intent.tsx`; unmatched paths land on `app/+not-found.tsx`. See "Links" in `CLAUDE.md`.
 - Docs: https://docs.expo.dev/router/introduction.md
 
 ## Building with EAS
@@ -39,3 +40,7 @@ Docs: https://docs.expo.dev/eas/index.md
 - If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
 - Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
 - Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
+
+## Project notes
+
+The Obsidian vault at `/home/setobagh/Desktop/ICN/ProjectInfo/ICN-app/` holds the learning notes (`Revision for Later/`) and the backlog (`Future changes/`). See the "Notes vault" section of `CLAUDE.md` for how they are kept.

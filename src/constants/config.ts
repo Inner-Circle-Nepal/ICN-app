@@ -31,6 +31,15 @@ export const SUPABASE_URL = (process.env.EXPO_PUBLIC_SUPABASE_URL ?? "").trim();
 export const SUPABASE_ANON_KEY = (process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ?? "").trim();
 
 /**
+ * Where article images live, for resizing through Storage's image transform.
+ * The same project as SUPABASE_URL everywhere but local testing, where the
+ * database is on this laptop but the copied stories still point at
+ * production's Storage (set only in local-backend.env).
+ */
+export const STORAGE_URL =
+  (process.env.EXPO_PUBLIC_STORAGE_URL ?? "").trim() || SUPABASE_URL;
+
+/**
  * Clerk's publishable key.
  *
  * Publishable by name and by nature — it identifies the Clerk application to

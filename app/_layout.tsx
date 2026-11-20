@@ -3,7 +3,7 @@ import { AppState, LogBox, Platform, StyleSheet, View } from "react-native";
 import { Stack, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import * as SplashScreen from "expo-splash-screen";
-import * as Linking from "expo-linking";
+import * as WebBrowser from "expo-web-browser";
 import { notificationsModule } from "@/lib/notifications/module";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
@@ -93,21 +93,27 @@ function AppShell() {
     prewarmSharedQueries(queryClient);
   }, []);
 
-  // Deep link & notification navigation handler
+  /*
+   * Notification taps. Links the system opens the app with (App Links,
+   * icn://) are not handled here: Expo Router routes those itself, through
+   * app/+native-intent.tsx. A second listener for them used to push the same
+   * screen twice.
+   */
   useEffect(() => {
     const navigateToUrl = (rawUrl: string | null) => {
       if (!rawUrl) return;
       const resolved = resolveDeepLink(rawUrl);
-      if (!resolved || resolved.type === "external") return;
+      if (!resolved) return;
+      if (resolved.type === "external") {
+        // A page the app doesn't have: show it rather than drop the tap.
+        void WebBrowser.openBrowserAsync(resolved.url).catch(() => {});
+        return;
+      }
       const target = deepLinkToRouterPath(resolved);
       if (target && target !== "/") {
         router.push(target);
       }
     };
-
-    const urlSub = Linking.addEventListener("url", (event) => {
-      navigateToUrl(event.url);
-    });
 
     /*
      * Absent in Expo Go, where the native module does not exist. Importing
@@ -142,15 +148,10 @@ function AppShell() {
         if (next === "active") void syncPushRegistrationOnResume();
       });
       return () => {
-        urlSub.remove();
         notifSub.remove();
         appStateSub.remove();
       };
     }
-
-    return () => {
-      urlSub.remove();
-    };
   }, [router]);
 
   return (
