@@ -46,6 +46,8 @@ import { RoomControls } from "@/components/chautari/RoomControls";
 import { InviteSheet } from "@/components/chautari/InviteSheet";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
+import { ChatSheet, ChatStrip } from "@/components/chautari/RoomChat";
+import { useRoomChat } from "@/features/chautari/useRoomChat";
 import { useMyProfile } from "@/features/profile/useMyProfile";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -113,6 +115,7 @@ const IDLE_ROOM: ChautariRoomState = {
   toggleMic: noop,
   retry: noop,
   setBlocked: noop,
+  onChatPacket: () => noop,
 };
 
 function isRoomNotFound(e: unknown): boolean {
@@ -185,7 +188,7 @@ function ChautariRoomScreenActive() {
 
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
-  const { isSignedIn, getToken } = useAuth();
+  const { isSignedIn, getToken, userId } = useAuth();
   const { user } = useUser();
 
   const { profile } = useMyProfile();
@@ -451,6 +454,20 @@ function ChautariRoomScreenActive() {
     [room.members],
   );
   const [handsOpen, setHandsOpen] = useState(false);
+
+  /* Live chat: history on join, then whatever the server pushes into the room. */
+  const chat = useRoomChat(slug, room, getToken);
+  const [chatOpen, setChatOpen] = useState(false);
+  const openChat = () => {
+    chat.setOpen(true);
+    setChatOpen(true);
+  };
+  const closeChat = () => {
+    chat.setOpen(false);
+    setChatOpen(false);
+  };
+  const chatRole = isHost ? "host" : isModerator ? "moderator" : room.canPublish ? "speaker" : "listener";
+  const canChat = Boolean(isSignedIn) && room.phase === "connected";
 
   // Invite people: the host or a moderator, booked or live. Nobody running
   // the room is offered, nor the reader themselves.
@@ -881,6 +898,20 @@ function ChautariRoomScreenActive() {
         onAccept={(m) => confirmAct(m, "approve_speaker")}
         onDecline={(m) => confirmAct(m, "deny_speaker")}
       />
+
+      <ChatSheet
+        visible={chatOpen}
+        onClose={closeChat}
+        chat={chat}
+        myId={userId ?? null}
+        myRole={room.role ? chatRole : null}
+        canWrite={canChat}
+        cannotWriteReason={
+          isSignedIn ? "Join the room to chat." : "Sign in to join the chat."
+        }
+      />
+
+      {room.phase === "connected" ? <ChatStrip chat={chat} onOpen={openChat} /> : null}
 
       <RoomControls
         isHost={isHost}

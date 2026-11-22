@@ -1,4 +1,5 @@
 import { CHAUTARI_API_URL } from "@/constants/config";
+import type { ChatMessage } from "@/features/chautari/chat";
 
 /**
  * Talking to the Chautari endpoints on the website.
@@ -312,6 +313,48 @@ export async function moderate(
   return call<{ role: RoomRole; applied: boolean }>(
     "/api/chautari/moderate",
     { method: "POST", body: JSON.stringify(args) },
+    getToken,
+  );
+}
+
+/* -------------------------------------------------------------- live chat */
+
+/**
+ * The most recent chat messages in a room, oldest first. Public: rooms are
+ * open to anyone, so reading the chat needs no sign-in.
+ */
+export async function getChat(slug: string): Promise<{ messages: ChatMessage[]; open: boolean }> {
+  const res = await call<{ messages: ChatMessage[]; open?: boolean }>(
+    `/api/chautari/chat?roomSlug=${encodeURIComponent(slug)}`,
+    { method: "GET" },
+  );
+  return { messages: res.messages ?? [], open: res.open !== false };
+}
+
+/**
+ * Send a message. The server checks the reader is in the room, stores it and
+ * pushes it to everyone; the stored message comes back so the sender sees it
+ * at once even if the broadcast is slow. Refusals carry a `reason`:
+ * `not_in_room`, `removed_from_room`, `room_ended`, `empty`, `too_long`.
+ */
+export async function sendChat(
+  getToken: GetToken,
+  slug: string,
+  text: string,
+): Promise<ChatMessage> {
+  const res = await call<{ message: ChatMessage }>(
+    "/api/chautari/chat",
+    { method: "POST", body: JSON.stringify({ roomSlug: slug, text }) },
+    getToken,
+  );
+  return res.message;
+}
+
+/** Remove a message: the host, a moderator, or whoever wrote it. */
+export async function deleteChat(getToken: GetToken, slug: string, messageId: string): Promise<void> {
+  await call(
+    "/api/chautari/chat",
+    { method: "DELETE", body: JSON.stringify({ roomSlug: slug, messageId }) },
     getToken,
   );
 }

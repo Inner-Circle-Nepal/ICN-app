@@ -10,6 +10,7 @@ import {
   type RemoteParticipant,
 } from "livekit-client";
 import { ChautariError, requestJoin, type GetToken, type RoomRole } from "@/lib/api/chautari";
+import { CHAT_TOPIC, decodeChatPacket, type ChatPacket } from "./chat";
 
 /**
  * Being in a live room.
@@ -114,6 +115,11 @@ export interface ChautariRoomState {
   retry: () => void;
   /** Stop hearing these identities. The screen owns persistence. */
   setBlocked: (identities: ReadonlySet<string>) => void;
+  /**
+   * Live chat packets the server pushes into the room (see features/chautari/
+   * chat.ts). Returns the unsubscribe function. The chat hook owns the list.
+   */
+  onChatPacket: (listener: (packet: ChatPacket) => void) => () => void;
 }
 
 /**
@@ -344,6 +350,9 @@ export function useChautariRoom(
   /** Identities the reader has blocked; read on every sync. */
   const blockedRef = useRef<ReadonlySet<string>>(new Set());
 
+  /* Whoever is showing the chat. A Set, so the panel and a preview can both listen. */
+  const chatListeners = useRef(new Set<(packet: ChatPacket) => void>());
+
   /**
    * Rebuild the member list, reusing objects for anyone who did not change.
    *
@@ -441,6 +450,12 @@ export function useChautariRoom(
         roomRef.current = room;
 
         room
+          .on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
+            // Chat is the only data on this topic, and only the server sends it.
+            if (topic !== CHAT_TOPIC || mine !== generation.current) return;
+            const packet = decodeChatPacket(payload);
+            if (packet) chatListeners.current.forEach((listener) => listener(packet));
+          })
           .on(RoomEvent.ParticipantConnected, () => syncMembers(room))
           .on(RoomEvent.ParticipantDisconnected, () => syncMembers(room))
           .on(RoomEvent.TrackPublished, () => syncMembers(room))
@@ -587,6 +602,14 @@ export function useChautariRoom(
   /* Never leave a connection, or a microphone, running past the screen. */
   useEffect(() => () => void teardown(), [teardown]);
 
+  const onChatPacket = useCallback((listener: (packet: ChatPacket) => void) => {
+    const listeners = chatListeners.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
   const setBlocked = useCallback((identities: ReadonlySet<string>) => {
     blockedRef.current = identities;
     if (roomRef.current) applyBlocks(roomRef.current, identities);
@@ -616,6 +639,7 @@ export function useChautariRoom(
     toggleMic,
     retry,
     setBlocked,
+    onChatPacket,
   };
 }
 
