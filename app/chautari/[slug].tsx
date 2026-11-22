@@ -20,6 +20,7 @@ import {
   endRoom,
   getRoomDetails,
   moderate,
+  playRoomEffect,
   setHandRaised,
   startRoom,
   type ModerationAction,
@@ -48,6 +49,7 @@ import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
 import { ChatSheet, ChatStrip } from "@/components/chautari/RoomChat";
 import { useRoomChat } from "@/features/chautari/useRoomChat";
+import { useRoomEffects } from "@/features/chautari/useRoomEffects";
 import { useMyProfile } from "@/features/profile/useMyProfile";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -116,6 +118,7 @@ const IDLE_ROOM: ChautariRoomState = {
   retry: noop,
   setBlocked: noop,
   onChatPacket: () => noop,
+  onEffectPacket: () => noop,
 };
 
 function isRoomNotFound(e: unknown): boolean {
@@ -468,6 +471,21 @@ function ChautariRoomScreenActive() {
   };
   const chatRole = isHost ? "host" : isModerator ? "moderator" : room.canPublish ? "speaker" : "listener";
   const canChat = Boolean(isSignedIn) && room.phase === "connected";
+
+  /* Applause: the host or a moderator asks the server; every app plays it. */
+  const effectLine = useRoomEffects(room);
+  const [clapBusy, setClapBusy] = useState(false);
+  const clap = async () => {
+    if (clapBusy) return;
+    setClapBusy(true);
+    try {
+      await playRoomEffect(getToken, slug, "clap");
+    } catch (e) {
+      setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
+    } finally {
+      setClapBusy(false);
+    }
+  };
 
   // Invite people: the host or a moderator, booked or live. Nobody running
   // the room is offered, nor the reader themselves.
@@ -911,6 +929,12 @@ function ChautariRoomScreenActive() {
         }
       />
 
+      {effectLine ? (
+        <View style={[styles.effectLine, { backgroundColor: palette.ink }]} pointerEvents="none">
+          <Text style={[styles.effectLineText, { color: palette.paper }]}>👏 {effectLine}</Text>
+        </View>
+      ) : null}
+
       {room.phase === "connected" ? <ChatStrip chat={chat} onOpen={openChat} /> : null}
 
       <RoomControls
@@ -926,6 +950,8 @@ function ChautariRoomScreenActive() {
         handRaised={handRaised}
         handBusy={handBusy}
         onToggleHand={() => void toggleHand()}
+        onClap={() => void clap()}
+        clapBusy={clapBusy}
         connected={room.phase === "connected"}
         insetsBottom={insets.bottom}
       />
@@ -1087,6 +1113,14 @@ function SectionHeader({
 /* ------------------------------------------------------------------- styles */
 
 const styles = StyleSheet.create({
+  effectLine: {
+    alignSelf: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginBottom: 8,
+  },
+  effectLineText: { fontFamily: fontFamilies.sansMedium, fontSize: 13 },
   inviteLink: { alignSelf: "flex-start", marginTop: 12 },
   inviteLinkText: {
     fontFamily: fontFamilies.sansMedium,

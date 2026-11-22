@@ -150,3 +150,36 @@ describe("chat API calls", () => {
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ roomSlug: "r", messageId: "a" });
   });
 });
+
+/* ------------------------------------------------------ sound effects */
+
+import { EFFECT_TOPIC, decodeEffectPacket } from "@/features/chautari/effects";
+import { playRoomEffect } from "@/lib/api/chautari";
+
+describe("applause packets", () => {
+  it("reads a clap with who triggered it", () => {
+    expect(decodeEffectPacket(encode({ type: "effect", effect: "clap", by: "Sita" }))).toEqual({
+      type: "effect",
+      effect: "clap",
+      by: "Sita",
+    });
+    expect(EFFECT_TOPIC).toBe("chautari.effect");
+  });
+
+  it("falls back to a neutral name, and ignores unknown effects", () => {
+    expect(decodeEffectPacket(encode({ type: "effect", effect: "clap" }))?.by).toBe("The host");
+    expect(decodeEffectPacket(encode({ type: "effect", effect: "airhorn", by: "x" }))).toBeNull();
+    expect(decodeEffectPacket(new TextEncoder().encode("nope"))).toBeNull();
+  });
+
+  it("asks the server to play it, with the session", async () => {
+    fetchMock.mockResolvedValue(reply({ ok: true, delivered: true }));
+    await playRoomEffect(token, "r", "clap");
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain("/api/chautari/effect");
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ roomSlug: "r", effect: "clap" });
+    expect((init as RequestInit).headers).toMatchObject({
+      authorization: "Bearer clerk_session_token_abc",
+    });
+  });
+});

@@ -358,3 +358,17 @@ export async function deleteChat(getToken: GetToken, slug: string, messageId: st
     getToken,
   );
 }
+
+/* --------------------------------------------------------- sound effects */
+
+/**
+ * Play applause for the whole room. Host or moderator only; the server
+ * refuses anyone else with `not_host`, and rate limits rounds (429).
+ */
+export async function playRoomEffect(getToken: GetToken, slug: string, effect: "clap"): Promise<void> {
+  await call(
+    "/api/chautari/effect",
+    { method: "POST", body: JSON.stringify({ roomSlug: slug, effect }) },
+    getToken,
+  );
+}

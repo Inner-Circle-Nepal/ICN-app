@@ -151,7 +151,13 @@
           }
         }
       ],
-      "./plugins/withOptionalHardware"
+      "./plugins/withOptionalHardware",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

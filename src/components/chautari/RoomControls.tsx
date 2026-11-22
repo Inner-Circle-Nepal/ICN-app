@@ -29,6 +29,8 @@ export function RoomControls({
   handRaised,
   handBusy,
   onToggleHand,
+  onClap,
+  clapBusy = false,
   connected,
   insetsBottom,
 }: {
@@ -45,6 +47,9 @@ export function RoomControls({
   handRaised: boolean;
   handBusy: boolean;
   onToggleHand: () => void;
+  /** Host or moderator: applause everyone in the room hears. */
+  onClap?: () => void;
+  clapBusy?: boolean;
   connected: boolean;
   insetsBottom: number;
 }) {
@@ -102,6 +107,32 @@ export function RoomControls({
               <Text style={styles.countText}>{handsCount > 99 ? "99+" : handsCount}</Text>
             </View>
           ) : null}
+        </Pressable>
+      ) : null}
+
+      {canModerate && onClap ? (
+        <Pressable
+          onPress={() => {
+            tick();
+            onClap();
+          }}
+          disabled={clapBusy || !connected}
+          accessibilityRole="button"
+          accessibilityLabel="Applause: play a clapping sound for everyone in the room"
+          accessibilityState={{ disabled: clapBusy || !connected, busy: clapBusy }}
+          style={({ pressed }) => [
+            styles.round,
+            { borderColor: palette.rule2, opacity: connected ? 1 : 0.4 },
+            pressed && styles.pressed,
+          ]}
+        >
+          {clapBusy ? (
+            <ActivityIndicator size="small" color={palette.ink} />
+          ) : (
+            <Text style={styles.clap} accessible={false}>
+              👏
+            </Text>
+          )}
         </Pressable>
       ) : null}
 
@@ -204,4 +235,5 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
   },
   pressed: { opacity: 0.7 },
+  clap: { fontSize: 22, lineHeight: 28 },
 });
