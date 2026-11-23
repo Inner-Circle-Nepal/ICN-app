@@ -1,9 +1,15 @@
-// Supabase Edge Function: send a breaking-news alert to every subscribed phone.
+// Supabase Edge Function: send news alerts to subscribed phones. (The name
+// predates "All news"; it stays because the webhook calls this URL.)
 //
 // Triggered by a Database Webhook on `public.articles` (INSERT and UPDATE).
-// It sends only when a story is published, flagged breaking, already live,
-// and has never been alerted before (`mobile_push_log`), so editing a
-// breaking story later does not alert anyone again.
+// A published, live story goes to two audiences that never overlap:
+//   - phones with All news on (`all_news_enabled`): every story published in
+//     the last day, once, claimed in `mobile_news_push_log`;
+//   - phones with Breaking on and All news off: breaking stories only, once,
+//     claimed in `mobile_push_log`.
+// So a reader with All news on gets one push for a breaking story, not two,
+// and editing a story later alerts nobody again. The decisions are in
+// `plan.ts`.
 //
 // Delivery goes through Expo's push service, which forwards to Apple (APNs)
 // and Google (FCM) with the credentials already stored on the Expo project.
@@ -13,20 +19,8 @@
 //   EXPO_ACCESS_TOKEN   optional; only if "enhanced push security" is on
 // SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are provided automatically.
 
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-
-type ArticleRecord = {
-  id: string;
-  slug: string;
-  title: string;
-  title_ne: string | null;
-  excerpt: string | null;
-  excerpt_ne: string | null;
-  hero_image: string | null;
-  status: string;
-  is_breaking: boolean;
-  published_at: string | null;
-};
+import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+import { type ArticleRecord, audiences, storyMessage } from "./plan.ts";
 
 type WebhookPayload = {
   type: "INSERT" | "UPDATE" | "DELETE";
@@ -45,79 +39,28 @@ const json = (body: unknown, status = 200) =>
     headers: { "Content-Type": "application/json" },
   });
 
-function trim(text: string | null | undefined, max: number): string {
-  const clean = (text ?? "").replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim();
-  return clean.length > max ? `${clean.slice(0, max - 1)}…` : clean;
-}
-
-// The story's photo, shown expanded under the alert (Android out of the box;
-// iOS would need a Notification Service Extension). Our own storage images
-// go through the resizer so a phone downloads ~80 KB, not the original.
-function alertImage(url: string | null): string | undefined {
-  if (!url || !/^https:\/\//.test(url)) return undefined;
-  const resized = url.replace("/storage/v1/object/public/", "/storage/v1/render/image/public/");
-  return resized === url ? url : `${resized}?width=800&quality=70`;
-}
-
-Deno.serve(async (req) => {
-  if (req.headers.get("x-webhook-secret") !== Deno.env.get("WEBHOOK_SECRET")) {
-    return json({ error: "unauthorised" }, 401);
-  }
-
-  const payload = (await req.json()) as WebhookPayload;
-  const a = payload.record;
-  if (payload.type === "DELETE" || !a) return json({ skipped: "no record" });
-
-  const live =
-    a.status === "published" &&
-    a.is_breaking &&
-    a.published_at !== null &&
-    new Date(a.published_at).getTime() <= Date.now();
-  if (!live) return json({ skipped: "not a live breaking story" });
-
-  const sb = createClient(
-    Deno.env.get("SUPABASE_URL")!,
-    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    { auth: { persistSession: false } },
-  );
-
-  // Claim the story first. The primary key makes this the dedupe: a second
-  // webhook for the same article (an edit, a retry) fails here and stops.
-  const { error: claimError } = await sb.from("mobile_push_log").insert({ article_id: a.id });
-  if (claimError) return json({ skipped: "already sent" });
-
+/** Every token matching the audience's opt-ins, read in pages of 1000. */
+async function readTokens(
+  sb: SupabaseClient,
+  audience: "story" | "breaking",
+): Promise<TokenRow[]> {
   const tokens: TokenRow[] = [];
   for (let from = 0; ; from += 1000) {
-    const { data, error } = await sb
-      .from("mobile_push_tokens")
-      .select("token, language")
-      .eq("breaking_enabled", true)
-      .range(from, from + 999);
-    if (error) return json({ error: error.message }, 500);
+    let query = sb.from("mobile_push_tokens").select("token, language");
+    query =
+      audience === "story"
+        ? query.eq("all_news_enabled", true)
+        : query.eq("breaking_enabled", true).eq("all_news_enabled", false);
+    const { data, error } = await query.range(from, from + 999);
+    if (error) throw new Error(error.message);
     tokens.push(...(data ?? []));
     if (!data || data.length < 1000) break;
   }
+  return tokens;
+}
 
-  const image = alertImage(a.hero_image);
-
-  const messages = tokens.map(({ token, language }) => {
-    const ne = language === "ne" && a.title_ne;
-    return {
-      to: token,
-      title: ne ? "ताजा समाचार" : "Breaking news",
-      subtitle: "Inner Circle Nepal",
-      body: trim(ne ? a.title_ne : a.title, 178),
-      sound: "default",
-      priority: "high",
-      channelId: "breaking-news",
-      threadId: "breaking",
-      // Breaking news that arrives a day late is not breaking.
-      ttl: 6 * 3600,
-      ...(image ? { richContent: { image } } : {}),
-      data: { path: `/article/${a.slug}`, slug: a.slug, tag: "breaking" },
-    };
-  });
-
+/** Send through Expo; returns how many were accepted and which tokens are dead. */
+async function deliver(messages: { to: string }[]) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
@@ -127,7 +70,6 @@ Deno.serve(async (req) => {
 
   let sent = 0;
   const dead: string[] = [];
-
   for (let i = 0; i < messages.length; i += BATCH) {
     const batch = messages.slice(i, i + BATCH);
     const res = await fetch(EXPO_PUSH_URL, {
@@ -144,11 +86,58 @@ Deno.serve(async (req) => {
       else if (t.details?.error === "DeviceNotRegistered") dead.push(batch[j].to);
     });
   }
+  return { sent, dead };
+}
+
+Deno.serve(async (req) => {
+  if (req.headers.get("x-webhook-secret") !== Deno.env.get("WEBHOOK_SECRET")) {
+    return json({ error: "unauthorised" }, 401);
+  }
+
+  const payload = (await req.json()) as WebhookPayload;
+  const a = payload.record;
+  if (payload.type === "DELETE" || !a) return json({ skipped: "no record" });
+
+  const due = audiences(a, Date.now());
+  if (!due.story && !due.breaking) return json({ skipped: "not a live story" });
+
+  const sb = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false } },
+  );
+
+  const result: Record<string, unknown> = { article: a.slug };
+  const dead: string[] = [];
+
+  // Each audience claims the story first. The primary key makes this the
+  // dedupe: a second webhook for the same article (an edit, a retry) fails
+  // here and that audience is skipped.
+  const runs = [
+    { audience: "story" as const, due: due.story, log: "mobile_news_push_log" },
+    { audience: "breaking" as const, due: due.breaking, log: "mobile_push_log" },
+  ];
+  for (const run of runs) {
+    if (!run.due) continue;
+    const { error: claimError } = await sb.from(run.log).insert({ article_id: a.id });
+    if (claimError) {
+      result[run.audience] = "already sent";
+      continue;
+    }
+    let tokens: TokenRow[];
+    try {
+      tokens = await readTokens(sb, run.audience);
+    } catch (e) {
+      return json({ ...result, error: (e as Error).message }, 500);
+    }
+    const out = await deliver(tokens.map((t) => storyMessage(a, t.token, t.language)));
+    dead.push(...out.dead);
+    await sb.from(run.log).update({ recipients: out.sent }).eq("article_id", a.id);
+    result[run.audience] = { recipients: tokens.length, sent: out.sent };
+  }
 
   // Phones that uninstalled the app or revoked permission.
   if (dead.length) await sb.from("mobile_push_tokens").delete().in("token", dead);
 
-  await sb.from("mobile_push_log").update({ recipients: sent }).eq("article_id", a.id);
-
-  return json({ article: a.slug, recipients: tokens.length, sent, removed: dead.length });
+  return json({ ...result, removed: dead.length });
 });

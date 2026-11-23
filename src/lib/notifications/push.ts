@@ -8,9 +8,11 @@ import {
   setSecurePushToken,
 } from "@/lib/storage/secureTokens";
 import {
+  getStoredAllNewsNotificationsPref,
   getStoredChautariNotificationsPref,
   getStoredNotificationsPref,
   getStoredReminderNotificationsPref,
+  setStoredAllNewsNotificationsPref,
   setStoredChautariNotificationsPref,
   setStoredNotificationsPref,
   setStoredReminderNotificationsPref,
@@ -18,6 +20,7 @@ import {
 import { brandColors } from "@/theme/tokens";
 import {
   registerPushToken,
+  setAllNewsPushPreference,
   setBreakingPushPreference,
   setChautariPushPreference,
   setReminderPushPreference,
@@ -117,20 +120,31 @@ export async function getPushNotificationState(): Promise<PushNotificationState>
 }
 
 /*
- * Three opt-ins share one registration: breaking news, Chautari alerts (from
- * the people you follow) and reminders. Any of them can be turned on first,
- * and that one asks the OS for permission; the token row then carries all
- * three preferences, and goes away only when all three are off.
+ * Four opt-ins share one registration: breaking news, all news, Chautari
+ * alerts (from the people you follow) and reminders. Any of them can be
+ * turned on first, and that one asks the OS for permission; the token row
+ * then carries all four preferences, and goes away only when all are off.
+ *
+ * All news covers breaking news: the sender sends such a phone one push per
+ * story, so the breaking opt-in is kept as it was (and comes back into
+ * effect when All news is turned off) but has no effect meanwhile.
  */
 
-/** Read the three stored opt-ins. */
+/** Read the four stored opt-ins. */
 async function storedOptIns() {
-  const [breaking, chautari, reminders] = await Promise.all([
+  const [breaking, allNews, chautari, reminders] = await Promise.all([
     getStoredNotificationsPref(),
+    getStoredAllNewsNotificationsPref(),
     getStoredChautariNotificationsPref(),
     getStoredReminderNotificationsPref(),
   ]);
-  return { breaking, chautari, reminders, any: breaking || chautari || reminders };
+  return {
+    breaking,
+    allNews,
+    chautari,
+    reminders,
+    any: breaking || allNews || chautari || reminders,
+  };
 }
 
 async function permissionGranted(): Promise<boolean> {
@@ -145,11 +159,13 @@ async function permissionGranted(): Promise<boolean> {
 
 /**
  * Register a token with every stored opt-in. `register_push_token` creates a
- * new row with Chautari and reminders off, so those are replayed every time.
+ * new row with all news, Chautari and reminders off, so those are replayed
+ * every time.
  */
 async function registerWithOptIns(token: string): Promise<boolean> {
   const optIns = await storedOptIns();
   const ok = await registerPushToken(token, optIns.breaking);
+  if (optIns.allNews) await setAllNewsPushPreference(token, true);
   if (optIns.chautari) await setChautariPushPreference(token, true);
   if (optIns.reminders) await setReminderPushPreference(token, true);
   if (ok) emitPushTokenRegistered(token);
@@ -187,6 +203,12 @@ async function ensureRegistered(): Promise<PushNotificationState> {
       importance: N.AndroidImportance.HIGH,
       lightColor: brandColors.icn700,
       vibrationPattern: [0, 200, 120, 200],
+    });
+    await N.setNotificationChannelAsync("news", {
+      name: "All news",
+      description: "Every new story from Inner Circle Nepal",
+      importance: N.AndroidImportance.DEFAULT,
+      lightColor: brandColors.icn700,
     });
     await N.setNotificationChannelAsync("chautari-live", {
       name: "Chautari: people you follow",
@@ -277,6 +299,43 @@ export async function disablePushNotifications(): Promise<PushNotificationState>
 
   const state = await getPushNotificationState();
   return { ...state, enabled: false, statusNote: null };
+}
+
+/**
+ * All news: a push for every new story. Includes breaking stories (sent
+ * once, styled as breaking), so the reader doesn't need the breaking switch.
+ */
+
+export type AllNewsPushState = {
+  enabled: boolean;
+  statusNote: string | null;
+};
+
+export async function getAllNewsPushState(): Promise<AllNewsPushState> {
+  const [stored, granted] = await Promise.all([
+    getStoredAllNewsNotificationsPref(),
+    permissionGranted(),
+  ]);
+  return { enabled: stored && granted, statusNote: null };
+}
+
+/** May show the OS prompt, when this is the first alert the reader turns on. */
+export async function enableAllNewsPush(): Promise<AllNewsPushState> {
+  await setStoredAllNewsNotificationsPref(true);
+  const state = await ensureRegistered();
+  if (!state.enabled) {
+    await setStoredAllNewsNotificationsPref(false);
+    return { enabled: false, statusNote: state.statusNote };
+  }
+  return { enabled: true, statusNote: state.statusNote };
+}
+
+export async function disableAllNewsPush(): Promise<AllNewsPushState> {
+  await setStoredAllNewsNotificationsPref(false);
+  const token = await getSecurePushToken();
+  if (token) await setAllNewsPushPreference(token, false);
+  await unregisterIfUnused();
+  return { enabled: false, statusNote: null };
 }
 
 /**

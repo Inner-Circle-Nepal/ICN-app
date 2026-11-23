@@ -68,6 +68,27 @@ export async function setBreakingPushPreference(
 }
 
 /**
+ * Flip the All news opt-in (every new story). The sender treats it as
+ * covering breaking news too, so such a phone gets one push per story.
+ */
+export async function setAllNewsPushPreference(
+  token: string,
+  enabled: boolean,
+): Promise<boolean> {
+  const sb = getPublicSupabase();
+  if (!sb || (Platform.OS !== "ios" && Platform.OS !== "android")) return false;
+  try {
+    const { error } = await sb.rpc("set_all_news_push_preference", {
+      p_token: token,
+      p_enabled: enabled,
+    });
+    return !error;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Flip the Chautari opt-in (alerts from the people you follow) for a token
  * already in `mobile_push_tokens`. A quiet no-op when the row is missing:
  * `push.ts` registers the phone before flipping any preference.

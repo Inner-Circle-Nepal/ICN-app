@@ -30,12 +30,15 @@ import {
   setStoredEdition,
 } from "@/lib/storage/preferences";
 import {
+  disableAllNewsPush,
   disableChautariPush,
   disablePushNotifications,
   disableReminderPush,
+  enableAllNewsPush,
   enableChautariPush,
   enablePushNotifications,
   enableReminderPush,
+  getAllNewsPushState,
   getChautariPushState,
   getPushNotificationState,
   getReminderPushState,
@@ -181,6 +184,10 @@ export default function SettingsScreen() {
   const [notifStatusMessage, setNotifStatusMessage] = useState<string | null>(
     null,
   );
+  const [allNewsEnabled, setAllNewsEnabled] = useState(false);
+  const [allNewsStatusMessage, setAllNewsStatusMessage] = useState<
+    string | null
+  >(null);
   const [chautariEnabled, setChautariEnabled] = useState(false);
   const [chautariStatusMessage, setChautariStatusMessage] = useState<
     string | null
@@ -261,6 +268,8 @@ export default function SettingsScreen() {
       if (state.statusNote) {
         setNotifStatusMessage(state.statusNote);
       }
+      const allNews = await getAllNewsPushState();
+      setAllNewsEnabled(allNews.enabled);
       const chautari = await getChautariPushState();
       setChautariEnabled(chautari.enabled);
       const reminder = await getReminderPushState();
@@ -294,6 +303,30 @@ export default function SettingsScreen() {
       await disablePushNotifications();
       setNotificationsEnabled(false);
       setNotifStatusMessage("Breaking-news alerts paused.");
+    }
+  };
+
+  const handleToggleAllNews = async (nextValue: boolean) => {
+    setAllNewsStatusMessage(null);
+    markNotificationsInteracted();
+    if (nextValue) {
+      const res = await enableAllNewsPush();
+      setAllNewsEnabled(res.enabled);
+      setAllNewsStatusMessage(
+        res.statusNote ??
+          (res.enabled
+            ? "You'll get every new story. Breaking news comes once, not twice."
+            : "Notification permission was not granted."),
+      );
+    } else {
+      // The breaking switch keeps its own setting and applies again.
+      await disableAllNewsPush();
+      setAllNewsEnabled(false);
+      setAllNewsStatusMessage(
+        notificationsEnabled
+          ? "All news paused. You'll still get breaking news."
+          : "All news paused.",
+      );
     }
   };
 
@@ -631,7 +664,7 @@ export default function SettingsScreen() {
             ]}
           >
             <View style={styles.switchTextCol}>
-              {!notificationsEnabled ? (
+              {!notificationsEnabled && !allNewsEnabled ? (
                 <Text style={[styles.hintKicker, { color: palette.red }]}>
                   Enable · नयाँ
                 </Text>
@@ -643,7 +676,11 @@ export default function SettingsScreen() {
                 Receive major breaking dispatches and investigative releases. We
                 never send promotional notifications.
               </Text>
-              {notifStatusMessage ? (
+              {allNewsEnabled ? (
+                <Text style={[styles.notifFeedback, { color: palette.ink2 }]}>
+                  Included in All news.
+                </Text>
+              ) : notifStatusMessage ? (
                 <Text
                   style={[styles.notifFeedback, { color: palette.ink2 }]}
                 >
@@ -652,8 +689,32 @@ export default function SettingsScreen() {
               ) : null}
             </View>
             <Switch
-              value={notificationsEnabled}
+              value={notificationsEnabled || allNewsEnabled}
+              disabled={allNewsEnabled}
               onValueChange={(val) => void handleToggleNotifications(val)}
+              trackColor={{ false: palette.rule2, true: palette.ink }}
+              thumbColor={palette.paper}
+            />
+          </View>
+
+          <View style={[styles.switchRow, { borderBottomColor: palette.rule }]}>
+            <View style={styles.switchTextCol}>
+              <Text style={[styles.settingTitle, { color: palette.ink }]}>
+                All News
+              </Text>
+              <Text style={[styles.settingDesc, { color: palette.quiet }]}>
+                A notification for every story we publish, several a day.
+                Includes breaking news, so you won&apos;t get those twice.
+              </Text>
+              {allNewsStatusMessage ? (
+                <Text style={[styles.notifFeedback, { color: palette.ink2 }]}>
+                  {allNewsStatusMessage}
+                </Text>
+              ) : null}
+            </View>
+            <Switch
+              value={allNewsEnabled}
+              onValueChange={(val) => void handleToggleAllNews(val)}
               trackColor={{ false: palette.rule2, true: palette.ink }}
               thumbColor={palette.paper}
             />

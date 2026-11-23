@@ -23,6 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const h = vi.hoisted(() => ({
   store: {} as Record<string, string>,
   pushState: { enabled: false },
+  allNewsState: { enabled: false },
   enableMock: vi.fn(async () => ({
     permission: "granted" as const,
     enabled: true,
@@ -52,6 +53,10 @@ vi.mock("@/lib/notifications/push", () => ({
     permission: h.pushState.enabled ? ("granted" as const) : ("undetermined" as const),
     enabled: h.pushState.enabled,
     deviceToken: h.pushState.enabled ? "fake-token" : null,
+    statusNote: null,
+  })),
+  getAllNewsPushState: vi.fn(async () => ({
+    enabled: h.allNewsState.enabled,
     statusNote: null,
   })),
 }));
@@ -94,6 +99,7 @@ async function mount() {
 beforeEach(() => {
   h.store = {};
   h.pushState.enabled = false;
+  h.allNewsState.enabled = false;
   h.enableMock.mockClear();
 });
 
@@ -157,6 +163,16 @@ describe("PushNudgeProvider — the article-count trigger", () => {
     await act(async () => api.recordArticleOpen());
     expect(api.pendingSheet).toBe(true);
     expect(h.store[KEYS.articleCount]).toBe("3");
+  });
+
+  it("never opens the sheet while All news is on, even with breaking off", async () => {
+    h.allNewsState.enabled = true;
+    await mount();
+    for (let i = 0; i < 5; i += 1) {
+      await act(async () => api.recordArticleOpen());
+    }
+    expect(api.pendingSheet).toBe(false);
+    expect(api.showSettingsDot).toBe(false);
   });
 
   it("never opens the sheet while push is enabled, no matter how many articles", async () => {

@@ -11,6 +11,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 import {
   enablePushNotifications,
+  getAllNewsPushState,
   getPushNotificationState,
 } from "@/lib/notifications/push";
 
@@ -95,7 +96,11 @@ export function PushNudgeProvider({ children }: { children: React.ReactNode }) {
         rawSilenced,
         rawArticles,
       ] = await Promise.all([
-        getPushNotificationState(),
+        // News alerts count as on with either switch: All news covers
+        // breaking, so its readers shouldn't be asked to turn breaking on.
+        Promise.all([getPushNotificationState(), getAllNewsPushState()]).then(
+          ([breaking, allNews]) => ({ enabled: breaking.enabled || allNews.enabled }),
+        ),
         AsyncStorage.getItem(STORAGE_KEYS.notificationsInteracted),
         AsyncStorage.getItem(STORAGE_KEYS.lastShownAt),
         AsyncStorage.getItem(STORAGE_KEYS.declineCount),

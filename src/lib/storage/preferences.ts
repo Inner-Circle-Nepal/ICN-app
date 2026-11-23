@@ -14,6 +14,7 @@ const KEYS = {
   edition: "icn-edition",
   recentSearches: "icn-recent-searches",
   notificationsEnabled: "icn-notifications-enabled",
+  allNewsNotificationsEnabled: "icn-all-news-notifications-enabled",
   chautariNotificationsEnabled: "icn-chautari-notifications-enabled",
   reminderNotificationsEnabled: "icn-reminder-notifications-enabled",
   nudgeArticleCount: "icn-nudge-article-count",
@@ -129,6 +130,26 @@ export async function getStoredNotificationsPref(): Promise<boolean> {
 export async function setStoredNotificationsPref(enabled: boolean): Promise<void> {
   try {
     await AsyncStorage.setItem(KEYS.notificationsEnabled, enabled ? "true" : "false");
+  } catch {
+    // Ignore storage errors
+  }
+}
+
+export async function getStoredAllNewsNotificationsPref(): Promise<boolean> {
+  try {
+    const raw = await AsyncStorage.getItem(KEYS.allNewsNotificationsEnabled);
+    return raw === "true";
+  } catch {
+    return false;
+  }
+}
+
+export async function setStoredAllNewsNotificationsPref(enabled: boolean): Promise<void> {
+  try {
+    await AsyncStorage.setItem(
+      KEYS.allNewsNotificationsEnabled,
+      enabled ? "true" : "false",
+    );
   } catch {
     // Ignore storage errors
   }

@@ -155,15 +155,15 @@ function resolvePathAndQuery(pathWithQuery: string): ResolvedDeepLink {
  * app/+native-intent.tsx.
  *
  * Only icn.news web links are rewritten: `/{category}/{slug}` becomes the
- * article screen, and a page the app doesn't have (privacy, unsubscribe, …)
- * is opened in a browser tab instead of a dead "Unmatched Route" screen.
+ * article screen. A path the app can't read (`/nepal/a/b`) is left as it is,
+ * matches no route, and lands on app/+not-found.tsx. The phone only hands
+ * the app the paths it claims (app.json), so such a link is one the website
+ * doesn't have either. (It used to open in a browser tab; on a cold start the
+ * tab never appeared and the reader was left on the front page.)
  * Everything else (icn:// links, Expo's own dev-client links) passes through
  * to Expo Router untouched.
  */
-export type SystemLinkTarget =
-  | { kind: "route"; path: string }
-  | { kind: "browser"; url: string }
-  | { kind: "passthrough" };
+export type SystemLinkTarget = { kind: "route"; path: string } | { kind: "passthrough" };
 
 export function systemLinkTarget(rawUrl: string): SystemLinkTarget {
   let parsed: URL;
@@ -176,7 +176,7 @@ export function systemLinkTarget(rawUrl: string): SystemLinkTarget {
   if (!web || !KNOWN_HOSTS.has(parsed.hostname.toLowerCase())) return { kind: "passthrough" };
 
   const resolved = resolvePathAndQuery(`${parsed.pathname}${parsed.search}`);
-  if (resolved.type === "external") return { kind: "browser", url: resolved.url };
+  if (resolved.type === "external") return { kind: "route", path: parsed.pathname };
   return { kind: "route", path: deepLinkToRouterPath(resolved) ?? "/" };
 }
 

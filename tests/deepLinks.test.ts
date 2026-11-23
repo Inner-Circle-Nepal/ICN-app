@@ -70,10 +70,15 @@ describe("deepLinks", () => {
       });
     });
 
-    it("sends website pages the app doesn't have to the browser", () => {
-      const target = systemLinkTarget("https://icn.news/privacy");
-      expect(target.kind).toBe("browser");
-      expect(target.kind === "browser" && target.url.endsWith("/privacy")).toBe(true);
+    it("leaves paths the app can't read unchanged, for the not-found screen", () => {
+      expect(systemLinkTarget("https://icn.news/nepal/not/a-story")).toEqual({
+        kind: "route",
+        path: "/nepal/not/a-story",
+      });
+      expect(systemLinkTarget("https://icn.news/privacy?x=1")).toEqual({
+        kind: "route",
+        path: "/privacy",
+      });
     });
 
     it("leaves app-scheme, dev-client and other-domain links to Expo Router", () => {
