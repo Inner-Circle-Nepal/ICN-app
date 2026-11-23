@@ -164,7 +164,10 @@ Clubhouse-style audio rooms on LiveKit.
 - **Scheduling**: rooms can be opened now or booked up to 30 days ahead (Kathmandu time). A booked room shows a waiting room with a countdown; the host or an assigned moderator taps **Go live**. Bookings nobody starts drop off three hours after their time.
 - **Cover photos**: an optional banner per room, resized by the website before storage.
 - **Staying in the room**: the connection is held by `ActiveRoomProvider`, so leaving the screen keeps the audio going (a mini bar shows the room), including with the phone locked.
-- **Lobby**: live rooms as cover cards, a "Coming up" row of scheduled rooms, and "Your rooms". The Chautari tab icon animates while any room is live.
+- **Live chat**: a strip above the controls opens the room's chat (last 50 messages, then live). Messages go through the website, which checks the writer is in the room and filters abusive words; long-press a message to delete your own, or to remove (hosts and moderators), block or report someone else's. The ⓘ in the chat explains this.
+- **Applause**: the host and moderators have a 👏 button; every phone in the room plays the same applause and shows who clapped.
+- **Safety**: reports (a person, a message, or a profile from its page) go to the newsroom's review queue with a reason and optional details. Blocking hides a person's voice and messages on this phone. A suspended reader sees the reason on the Chautari tab instead of rooms.
+- **Lobby**: live rooms as cover cards (they animate in and out as rooms start and end, updated in real time while the tab is open), a "Coming up" row of scheduled rooms, and "Your rooms". The Chautari tab icon animates while any room is live.
 
 ---
 
@@ -215,6 +218,6 @@ the current sentence; that is deliberate and commented in
 - Data notes from the original build, worth re-checking: no published story has an author (bylines fall back to the newsroom), and the Nepali-body and Nepali-search migrations (`2026-10-nepali-bodies.sql`, `2026-10-nepali-search.sql`) were unapplied; the data layer falls back when those columns are missing.
 - No component rendering tests: the suite covers data, parsing, state machines and API clients. Vitest can't load React Native, so screens aren't rendered in tests.
 - `app/(tabs)/settings.tsx` and `app/chautari/[slug].tsx` are large and mix several concerns.
-- Follows have no lists or search yet; the way to reach someone's profile is from a Chautari room.
-- "Remind me" for scheduled rooms and follower-based Chautari notifications are planned together as a notifications overhaul.
+- Follows have no lists yet; profiles are reached from People search, @handles, or a Chautari room.
+- Nothing alerts the newsroom when a report arrives; someone has to check the website's Reports page.
 - iOS push is configured but has not been verified on a device.
