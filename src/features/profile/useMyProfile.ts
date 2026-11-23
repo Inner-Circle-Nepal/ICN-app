@@ -5,8 +5,9 @@ import {
   createProfile,
   getMyProfile,
   updateMyProfile,
+  type MyProfile,
+  type MySuspension,
   type ProfilePatch,
-  type ReaderProfile,
 } from "@/lib/api/readerProfile";
 
 /**
@@ -26,7 +27,9 @@ import {
 export const MY_PROFILE_KEY = ["readerProfile", "me"] as const;
 
 export type UseMyProfileResult = {
-  profile: ReaderProfile | null;
+  profile: MyProfile | null;
+  /** The newsroom suspended this reader: everything interactive is refused. */
+  suspension: MySuspension | null;
   isLoading: boolean;
   /** The request failed and there is no cached profile to show. */
   isError: boolean;
@@ -55,6 +58,7 @@ export function useMyProfile(): UseMyProfileResult {
 
   return {
     profile,
+    suspension: profile?.suspension ?? null,
     isLoading: signedIn && query.isLoading,
     isError: signedIn && query.isError && profile === null,
     isSignedIn: signedIn,
@@ -80,6 +84,13 @@ export function useCreateProfile() {
     },
     onSuccess: (profile) => {
       qc.setQueryData(MY_PROFILE_KEY, profile);
+    },
+    onError: (e) => {
+      // Created elsewhere meanwhile: the screen treats it as success, so the
+      // cached "no profile" must be replaced with the real row.
+      if ((e as { reason?: string }).reason === "profile_exists") {
+        void qc.invalidateQueries({ queryKey: MY_PROFILE_KEY });
+      }
     },
   });
 }

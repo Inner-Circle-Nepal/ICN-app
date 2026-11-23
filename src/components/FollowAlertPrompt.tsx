@@ -4,6 +4,8 @@ import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "re
 import { useFollowNotifyMutation } from "@/features/profile/useFollow";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
+import { useToast } from "@/components/Toast";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * Asked right after following someone: hear about their Chautari rooms?
@@ -25,6 +27,7 @@ export function FollowAlertPrompt({
 }) {
   const { palette } = useTheme();
   const notify = useFollowNotifyMutation();
+  const toast = useToast();
   const [note, setNote] = useState<string | null>(null);
 
   const accept = () => {
@@ -32,8 +35,8 @@ export function FollowAlertPrompt({
       { username, notify: true },
       {
         onSuccess: ({ phoneNote }) => {
-          if (phoneNote) setNote(phoneNote);
-          else onDone();
+          if (phoneNote) toast.show({ icon: "bell", message: phoneNote });
+          onDone();
         },
         onError: () => setNote("Could not save that. Try again from their profile."),
       },
@@ -43,7 +46,7 @@ export function FollowAlertPrompt({
   if (note) {
     return (
       <View>
-        <Text style={[styles.body, { color: palette.ink2 }]}>{note}</Text>
+        <ErrorMessage message={note} />
         <Pressable
           onPress={onDone}
           accessibilityRole="button"
@@ -102,6 +105,7 @@ export function FollowAlertToggle({
 }) {
   const { palette } = useTheme();
   const notify = useFollowNotifyMutation();
+  const toast = useToast();
   const [note, setNote] = useState<string | null>(null);
 
   const change = (next: boolean) => {
@@ -109,7 +113,9 @@ export function FollowAlertToggle({
     notify.mutate(
       { username, notify: next },
       {
-        onSuccess: ({ phoneNote }) => setNote(phoneNote),
+        onSuccess: ({ phoneNote }) => {
+          if (phoneNote) toast.show({ icon: "bell", message: phoneNote });
+        },
         onError: () => setNote("Could not save that. Please try again."),
       },
     );
@@ -122,7 +128,7 @@ export function FollowAlertToggle({
         <Text style={[styles.toggleDesc, { color: palette.quiet }]}>
           When {name} goes live or invites you to a room.
         </Text>
-        {note ? <Text style={[styles.toggleNote, { color: palette.ink2 }]}>{note}</Text> : null}
+        {note ? <ErrorMessage compact message={note} /> : null}
       </View>
       <Switch
         value={value}
@@ -187,5 +193,4 @@ const styles = StyleSheet.create({
   toggleText: { flex: 1 },
   toggleTitle: { fontFamily: fontFamilies.serifMedium, fontSize: 16 },
   toggleDesc: { fontFamily: fontFamilies.sansRegular, fontSize: 13, lineHeight: 18, marginTop: 2 },
-  toggleNote: { fontFamily: fontFamilies.sansRegular, fontSize: 13, lineHeight: 18, marginTop: 6 },
 });

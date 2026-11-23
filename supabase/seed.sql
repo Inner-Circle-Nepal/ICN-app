@@ -22,8 +22,21 @@ select cron.schedule(
 -- these need no Clerk account. They can't sign in or act on their own; drive
 -- their rooms with supabase/scripts/bots.sh. Ids start `user_bot_` so they are
 -- easy to tell apart from real (Clerk development) test accounts.
-insert into public.reader_profiles (clerk_user_id, username, display_name, bio) values
-  ('user_bot_sita',  'bot_sita',  'Sita Bot',  'Test host. Talks about markets and the morning news.'),
-  ('user_bot_ram',   'bot_ram',   'Ram Bot',   'Test host. Cricket, mostly.'),
-  ('user_bot_maya',  'bot_maya',  'Maya Bot',  'Test host. Books rooms for later.')
-on conflict (clerk_user_id) do nothing;
+--
+-- Their profile pictures are served from local Storage, like real readers'
+-- photos are served from a CDN. The files are in supabase/scripts/bot-avatars/
+-- and are uploaded by `npm run bots -- avatars` (again after every db reset:
+-- a reset empties Storage). The phone reaches 127.0.0.1:54321 through
+-- `npm run adb:reverse`.
+insert into public.reader_profiles (clerk_user_id, username, display_name, bio, avatar_url) values
+  ('user_bot_sita',  'bot_sita',  'Sita Bot',  'Test host. Talks about markets and the morning news.',
+   'http://127.0.0.1:54321/storage/v1/object/public/bot-avatars/sita.png'),
+  ('user_bot_ram',   'bot_ram',   'Ram Bot',   'Test host. Cricket, mostly.',
+   'http://127.0.0.1:54321/storage/v1/object/public/bot-avatars/ram.png'),
+  ('user_bot_maya',  'bot_maya',  'Maya Bot',  'Test host. Books rooms for later.',
+   'http://127.0.0.1:54321/storage/v1/object/public/bot-avatars/maya.png')
+on conflict (clerk_user_id) do update set avatar_url = excluded.avatar_url;
+
+insert into storage.buckets (id, name, public)
+values ('bot-avatars', 'bot-avatars', true)
+on conflict (id) do nothing;

@@ -37,6 +37,8 @@ function sendErrorText(e: unknown): string {
       return "Sign in to chat.";
     case "too_long":
     case "empty":
+    case "blocked_words":
+    case "account_suspended":
       return e.message;
     default:
       return e.status === 429 ? e.message : "Your message wasn't sent. Try again.";

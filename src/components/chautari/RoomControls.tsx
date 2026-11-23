@@ -4,6 +4,7 @@ import * as Haptics from "expo-haptics";
 
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
+import { HandButton } from "./HandButton";
 import { HandIcon, MicIcon } from "./RoomIcons";
 
 /**
@@ -157,31 +158,15 @@ export function RoomControls({
           <MicIcon size={24} color={micEnabled ? palette.paper : palette.ink} off={!micEnabled} />
         </Pressable>
       ) : (
-        <Pressable
+        <HandButton
+          raised={handRaised}
+          busy={handBusy}
+          disabled={handBusy || !connected}
           onPress={() => {
             tick();
             onToggleHand();
           }}
-          disabled={handBusy || !connected}
-          accessibilityRole="button"
-          accessibilityLabel={handRaised ? "Lower your hand" : "Raise your hand to speak"}
-          accessibilityState={{ selected: handRaised, disabled: handBusy || !connected }}
-          style={({ pressed }) => [
-            styles.round,
-            {
-              borderColor: handRaised ? palette.ink : palette.rule2,
-              backgroundColor: handRaised ? palette.ink : "transparent",
-              opacity: connected ? 1 : 0.4,
-            },
-            pressed && styles.pressed,
-          ]}
-        >
-          {handBusy ? (
-            <ActivityIndicator size="small" color={handRaised ? palette.paper : palette.ink} />
-          ) : (
-            <HandIcon size={24} color={handRaised ? palette.paper : palette.ink} />
-          )}
-        </Pressable>
+        />
       )}
     </View>
   );

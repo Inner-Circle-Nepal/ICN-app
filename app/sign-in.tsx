@@ -22,6 +22,7 @@ import { ErrorState } from "@/components/ErrorState";
 import { useQueryClient } from "@tanstack/react-query";
 import { getMyProfile } from "@/lib/api/readerProfile";
 import { MY_PROFILE_KEY } from "@/features/profile/useMyProfile";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * Reader sign-in, for Chautari.
@@ -268,11 +269,7 @@ function SignInScreenActive() {
           />
         )}
 
-        {error ? (
-          <Text style={[styles.error, { color: palette.red }]} accessibilityRole="alert">
-            {error}
-          </Text>
-        ) : null}
+        {error ? <ErrorMessage message={error} /> : null}
 
         <Pressable
           onPress={() => void (stage === "email" ? sendCode() : verify())}
@@ -427,7 +424,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   codeInput: { letterSpacing: 6, fontSize: 20 },
-  error: { fontFamily: fontFamilies.sansRegular, fontSize: 13, lineHeight: 19, marginTop: 12 },
   primary: {
     marginTop: 18,
     minHeight: 48,

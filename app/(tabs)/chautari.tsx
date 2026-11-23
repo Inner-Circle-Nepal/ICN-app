@@ -1,19 +1,23 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  Linking,
   Pressable,
   RefreshControl,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { useFocusEffect, useRouter } from "expo-router";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { discoverRooms, type DiscoverRoom } from "@/lib/api/chautari";
+import { useLiveRoomList } from "@/features/chautari/useLiveRoomList";
+import { useEnterExitList } from "@/features/chautari/useEnterExitList";
+import { ENTER_MS, EXIT_MS, EnterExit } from "@/components/chautari/EnterExit";
 import { isClerkConfigured } from "@/constants/config";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
@@ -54,13 +58,61 @@ import { useMyProfile } from "@/features/profile/useMyProfile";
  *   - speaker names are not rendered on cards — just the host and a count
  *   - the "RE:" line falls back to the room's existing `description`
  */
+const ROOMS_KEY = ["chautari-rooms"] as const;
+
+const roomKey = (r: DiscoverRoom) => r.slug;
+/** How long an ended room stays to animate out (and a new one counts as new). */
+const HOLD_MS = Math.max(ENTER_MS, EXIT_MS) + 80;
+
 export default function ChautariScreen() {
+  // Clerk's hooks need <ClerkProvider>, which exists only when configured.
+  return isClerkConfigured ? <ChautariForAccount /> : <ChautariLobby />;
+}
+
+/**
+ * A suspended reader can't join, host, chat or invite, so the whole tab says
+ * so once, with the reason and how to appeal, instead of listing rooms that
+ * would each refuse them. The server refuses regardless; this is the honest
+ * screen. Re-checked whenever the tab comes into view, so a suspension that
+ * was lifted shows the rooms again straight away.
+ */
+function ChautariForAccount() {
+  const { suspension, refetch } = useMyProfile();
+  useFocusEffect(
+    useCallback(() => {
+      void refetch();
+    }, [refetch]),
+  );
+  return suspension ? <ChautariSuspended message={suspension.message} /> : <ChautariLobby />;
+}
+
+function ChautariSuspended({ message }: { message: string }) {
+  const { palette } = useTheme();
+  return (
+    <View style={[styles.screen, { backgroundColor: palette.paper }]}>
+      <Masthead palette={palette} />
+      <EmptyState
+        kicker="Account suspended"
+        title="Chautari isn't available to you"
+        description={message}
+        actionLabel="Email the newsroom"
+        onAction={() =>
+          void Linking.openURL(
+            `mailto:newsroom@icn.news?subject=${encodeURIComponent("Appeal: account suspension")}`,
+          )
+        }
+      />
+    </View>
+  );
+}
+
+function ChautariLobby() {
   const router = useRouter();
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
 
   const rooms = useQuery({
-    queryKey: ["chautari-rooms"],
+    queryKey: ROOMS_KEY,
     queryFn: discoverRooms,
     staleTime: 30 * 1000,
     refetchInterval: 60 * 1000,
@@ -80,8 +132,12 @@ export default function ChautariScreen() {
      */
     placeholderData: keepPreviousData,
   });
+  // Rooms going live or ending show up at once, not on the next poll.
+  useLiveRoomList(ROOMS_KEY);
 
   const { live, scheduled } = useMemo(() => split(rooms.data ?? []), [rooms.data]);
+  // Rooms going live animate in; ended ones stay a moment to animate out.
+  const shownLive = useEnterExitList(rooms.data ? live : undefined, roomKey, HOLD_MS);
   const nowNpt = useNowClock();
 
   const openRoom = (room: DiscoverRoom) =>
@@ -96,8 +152,8 @@ export default function ChautariScreen() {
       <OnAirChyron count={live.length} now={nowNpt} palette={palette} />
 
       <FlatList
-        data={live}
-        keyExtractor={(r) => r.slug}
+        data={shownLive}
+        keyExtractor={(row) => row.key}
         contentContainerStyle={[
           styles.list,
           { paddingBottom: 96 + Math.max(0, insets.bottom) },
@@ -121,7 +177,11 @@ export default function ChautariScreen() {
             ) : null}
           </View>
         }
-        renderItem={({ item }) => <LiveRoomCard room={item} onPress={() => openRoom(item)} />}
+        renderItem={({ item: row }) => (
+          <EnterExit entering={row.entering} leaving={row.leaving}>
+            <LiveRoomCard room={row.item} onPress={() => openRoom(row.item)} />
+          </EnterExit>
+        )}
         ListEmptyComponent={
           <EmptyFallback isLoading={rooms.isLoading} palette={palette} />
         }

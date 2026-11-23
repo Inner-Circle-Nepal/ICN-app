@@ -13,6 +13,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { subscribeToNewsletter } from "@/lib/api/newsletter";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
+import { useToast } from "@/components/Toast";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * Editorial newsletter subscription band ("Six continents. One newsroom.").
@@ -48,7 +50,7 @@ export function NewsletterBox({
 }: NewsletterBoxProps) {
   const { palette, editionSlug } = useTheme();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [isSuccess, setIsSuccess] = useState(false);
+  const toast = useToast();
 
   const {
     control,
@@ -67,10 +69,12 @@ export function NewsletterBox({
       edition: editionSlug,
       source,
     });
-    setIsSuccess(result.ok);
-    setStatusMessage(result.message);
     if (result.ok) {
+      // Confirmation as a toast; a failure stays here, next to the field.
+      toast.show({ icon: "check", message: result.message });
       reset();
+    } else {
+      setStatusMessage(result.message);
     }
   };
 
@@ -146,22 +150,9 @@ export function NewsletterBox({
         </Pressable>
       </View>
 
-      {errors.email?.message ? (
-        <Text style={[styles.feedbackText, { color: palette.red }]}>
-          {errors.email.message}
-        </Text>
-      ) : null}
+      {errors.email?.message ? <ErrorMessage compact message={errors.email.message} /> : null}
 
-      {statusMessage ? (
-        <Text
-          style={[
-            styles.feedbackText,
-            { color: isSuccess ? palette.ink : palette.red },
-          ]}
-        >
-          {statusMessage}
-        </Text>
-      ) : null}
+      {statusMessage ? <ErrorMessage compact message={statusMessage} /> : null}
     </View>
   );
 }
@@ -227,12 +218,6 @@ const styles = StyleSheet.create({
     fontSize: 11.5,
     letterSpacing: 1.4,
     textTransform: "uppercase",
-  },
-  feedbackText: {
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 8,
   },
   pressed: {
     opacity: 0.75,

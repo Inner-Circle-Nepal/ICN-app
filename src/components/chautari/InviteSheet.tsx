@@ -7,6 +7,7 @@ import { UserSearchField } from "@/components/UserSearchField";
 import { ChautariError, inviteToRoom, type InviteResult } from "@/lib/api/chautari";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * Invite people to a room: pick readers by @handle or name, send once.
@@ -129,7 +130,7 @@ export function InviteSheet({
         </View>
       ) : null}
 
-      {error ? <Text style={[styles.error, { color: palette.red }]}>{error}</Text> : null}
+      {error ? <ErrorMessage message={error} /> : null}
 
       <Pressable
         onPress={() => void send()}
@@ -182,7 +183,6 @@ const styles = StyleSheet.create({
     textDecorationLine: "underline",
   },
   field: { marginTop: 12 },
-  error: { fontFamily: fontFamilies.sansRegular, fontSize: 13, lineHeight: 19, marginTop: 10 },
   send: {
     marginTop: 16,
     borderWidth: 1,

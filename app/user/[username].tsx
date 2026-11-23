@@ -19,6 +19,10 @@ import { useFollowMutation, useFollowStatus, useUnfollowMutation } from "@/featu
 import { ReaderApiError } from "@/lib/api/readerProfile";
 import { BottomSheet } from "@/components/chautari/BottomSheet";
 import { FollowAlertPrompt, FollowAlertToggle } from "@/components/FollowAlertPrompt";
+import { ReportForm } from "@/components/chautari/ReportForm";
+import { useSendReport } from "@/features/reports/useSendReport";
+import { useToast } from "@/components/Toast";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * Public reader profile — reachable at `/user/<handle>`.
@@ -27,6 +31,10 @@ import { FollowAlertPrompt, FollowAlertToggle } from "@/components/FollowAlertPr
  * profile). The follow button routes an unauthenticated tap to `/sign-in`
  * rather than disabling: a tap that does nothing is worse than a tap that
  * explains why.
+ *
+ * Anyone signed in can report a profile (App Store guideline 1.2); the
+ * report joins the newsroom's queue at /admin/reports with the profile as
+ * it is now.
  *
  * Initials come from `display_name` via the existing `Avatar` fallback;
  * `avatar_url` is rendered when present. No image upload happens here —
@@ -50,6 +58,19 @@ export default function PublicProfileScreen() {
   const isLoading = profileQuery.isLoading;
   // Right after following: ask whether to hear about their Chautari rooms.
   const [askAlerts, setAskAlerts] = useState(false);
+
+  const report = useSendReport();
+  const toast = useToast();
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportNotice, setReportNotice] = useState<string | null>(null);
+  const openReport = useCallback(() => {
+    if (!report.isSignedIn) {
+      router.push("/sign-in");
+      return;
+    }
+    setReportNotice(null);
+    setReportOpen(true);
+  }, [report.isSignedIn, router]);
 
   const handleFollow = useCallback(() => {
     if (!profile || !status) return;
@@ -181,6 +202,28 @@ export default function PublicProfileScreen() {
                 value={status.notify ?? false}
               />
             ) : null}
+
+            {status && !status.is_self ? (
+              <View style={styles.reportBlock}>
+                <Pressable
+                  onPress={openReport}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Report @${profile.username}`}
+                >
+                  <Text style={[styles.reportLink, { color: palette.quiet }]}>
+                    Report @{profile.username}
+                  </Text>
+                </Pressable>
+                {reportNotice ? (
+                  <ErrorMessage
+                    message={reportNotice}
+                    onDismiss={() => setReportNotice(null)}
+                    style={styles.reportError}
+                  />
+                ) : null}
+              </View>
+            ) : null}
           </>
         )}
       </ScrollView>
@@ -191,6 +234,29 @@ export default function PublicProfileScreen() {
             name={profile.display_name}
             username={profile.username}
             onDone={() => setAskAlerts(false)}
+          />
+        </BottomSheet>
+      ) : null}
+
+      {profile ? (
+        <BottomSheet visible={reportOpen} onClose={() => setReportOpen(false)}>
+          <ReportForm
+            heading={`Report @${profile.username}`}
+            question="What's wrong with this profile?"
+            onBack={() => setReportOpen(false)}
+            onSubmit={(reason, details) => {
+              setReportOpen(false);
+              report.mutate(
+                { target: { kind: "profile", username: profile.username }, reason, details },
+                {
+                  onSuccess: (message) => toast.show({ icon: "check", message }),
+                  onError: (e) =>
+                    setReportNotice(
+                      e instanceof ReaderApiError ? e.message : "Your report wasn't sent. Try again.",
+                    ),
+                },
+              );
+            }}
           />
         </BottomSheet>
       ) : null}
@@ -296,6 +362,16 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4,
     textTransform: "uppercase",
   },
+  reportBlock: {
+    marginTop: 36,
+    alignItems: "center",
+  },
+  reportLink: {
+    fontFamily: fontFamilies.sansRegular,
+    fontSize: 13,
+    textDecorationLine: "underline",
+  },
+  reportError: { alignSelf: "stretch" },
   selfNote: {
     fontFamily: fontFamilies.sansRegular,
     fontSize: 13,

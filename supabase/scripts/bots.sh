@@ -8,8 +8,24 @@
 #   npm run bots -- golive <slug>                    start a booked room
 #   npm run bots -- end <slug>                       end a room
 #   npm run bots -- list                             rooms and bots
+#   npm run bots -- avatars                          upload the bots' profile pictures (after a db reset)
+#   npm run bots -- staff                            local newsroom login staff@local.test / staff1234 (superadmin)
+#
+#   Live chat and applause (the room must be live and you must be in it):
+#   npm run bots -- say <slug> <bot> [text]          a bot writes in the chat
+#   npm run bots -- chatter <slug> [count] [secs]    the bots take turns (default 6, 2 s apart)
+#   npm run bots -- unsay <slug> [bot]               delete the latest message (that bot's, or anyone's)
+#   npm run bots -- clap <slug> [bot]                applause, credited to the bot (default: the host)
+#   npm run bots -- chat <slug>                      the last 20 messages, deleted ones marked
+#   npm run bots -- reports                          the latest reports (from readers and the word filter)
 #
 # <bot> is a username without or with the prefix: `sita` or `bot_sita`.
+#
+# Chat and applause do what the site's routes do: store the row, then push the
+# packet into the room through the LOCAL LiveKit (livekit-send.mjs, keys read
+# from the site's .env.development.local). They skip the site's checks and
+# rate limits on purpose: bots don't join the room. LiveKit only knows a room
+# once someone has joined it, so join from the phone first.
 #
 # Going live (`live`, `golive`) changes chautari_rooms the same way the site
 # does, so the live-push webhook fires: followers of that bot with "Notify me"
@@ -18,7 +34,50 @@ set -euo pipefail
 
 db() { docker exec -i supabase_db_ICN-app psql -U postgres -q -v ON_ERROR_STOP=1 "$@"; }
 
-usage() { sed -n '5,10p' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { grep -E '^#   (npm run bots|Live chat)' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+
+here=$(cd "$(dirname "$0")" && pwd)
+SITE_ENV=${SITE_ENV:-$here/../../../../site/site/.env.development.local}
+
+# Push "<livekit room>\t<packet json>" (one line, as the SQL below returns) on a topic.
+push() {
+  local line=$1 topic=$2 room packet
+  [ -n "$line" ] || { echo "Nothing to send: is the room live, and does it exist?" >&2; exit 1; }
+  IFS=$'\t' read -r room packet <<<"$line"
+  printf '%s' "$packet" | node "$here/livekit-send.mjs" "$room" "$topic" "$SITE_ENV"
+}
+
+SAMPLE_LINES=(
+  "Namaste everyone 🙏"
+  "Can you all hear the host clearly?"
+  "नमस्ते सबैलाई!"
+  "Great point about remittances."
+  "Joining late, what did I miss?"
+  "+1 to that"
+  "Is this being recorded?"
+  "Thanks for hosting this 👏"
+)
+
+# Store one chat message from a bot; prints "<livekit room>\t<packet>".
+say_sql() {
+  db -tA -v slug="$1" -v bot="$2" -v text="$3" <<'SQL'
+with r as (
+  select id, host_clerk_id, livekit_room from public.chautari_rooms
+  where slug = :'slug' and status = 'live'
+), ins as (
+  insert into public.chautari_messages (room_id, clerk_user_id, display_name, avatar_url, role, body)
+  select r.id, p.clerk_user_id, p.display_name, p.avatar_url,
+    case when r.host_clerk_id = p.clerk_user_id then 'host' else 'listener' end, :'text'
+  from r, public.reader_profiles p where p.clerk_user_id = :'bot'
+  returning *
+)
+select r.livekit_room || E'\t' || json_build_object('type', 'message', 'message', json_build_object(
+  'id', ins.id, 'authorId', ins.clerk_user_id,
+  'name', coalesce(nullif(trim(ins.display_name), ''), 'Listener'),
+  'avatarUrl', ins.avatar_url, 'role', ins.role, 'text', ins.body, 'sentAt', ins.created_at))::text
+from ins, r;
+SQL
+}
 
 bot_id() {
   local name=${1#bot_}
@@ -62,6 +121,43 @@ case "$cmd" in
   end)
     [ $# -eq 1 ] || usage
     db -tA -v slug="$1" <<<"update public.chautari_rooms set status = 'ended', ended_at = now(), updated_at = now() where slug = :'slug' and status <> 'ended' returning slug || '  ended';" ;;
+  staff)
+    # A newsroom (admin) login for http://localhost:3001/admin, LOCAL only.
+    # Safe to re-run: it resets the password and the superadmin profile.
+    # A db reset deletes it; run this again afterwards.
+    key=$(grep -E '^SUPABASE_SERVICE_ROLE_KEY=' "$SITE_ENV" | cut -d= -f2- | tr -d '"'"'")
+    api=$(grep -E '^NEXT_PUBLIC_SUPABASE_URL=' "$SITE_ENV" | cut -d= -f2- | tr -d '"'"'")
+    case "$api" in http://127.0.0.1*|http://localhost*) ;; *) echo "Refusing: Supabase URL is not local." >&2; exit 1 ;; esac
+    email=staff@local.test password=staff1234
+    id=$(db -tA -v e="$email" <<<"select id from auth.users where email = :'e';")
+    body="{\"email\":\"$email\",\"password\":\"$password\",\"email_confirm\":true,\"user_metadata\":{\"full_name\":\"Local Staff\"}}"
+    if [ -n "$id" ]; then
+      curl -s -o /dev/null -X PUT "$api/auth/v1/admin/users/$id" -H "apikey: $key" -H "Authorization: Bearer $key" -H "Content-Type: application/json" -d "$body"
+    else
+      curl -s -o /dev/null -X POST "$api/auth/v1/admin/users" -H "apikey: $key" -H "Authorization: Bearer $key" -H "Content-Type: application/json" -d "$body"
+    fi
+    db -tA -v e="$email" <<'SQL'
+insert into public.profiles (id, email, full_name, role, capabilities, is_active)
+select id, email, 'Local Staff', 'superadmin', '{}', true from auth.users where email = :'e'
+on conflict (id) do update set role = 'superadmin', is_active = true;
+SQL
+    echo "Newsroom login (local only): $email / $password at http://localhost:3001/admin/login" ;;
+  avatars)
+    # Same public bucket and paths as supabase/seed.sql, uploaded through the
+    # local Storage API with the local service key (never production).
+    key=$(grep -E '^SUPABASE_SERVICE_ROLE_KEY=' "$SITE_ENV" | cut -d= -f2- | tr -d '"'"'")
+    api=$(grep -E '^NEXT_PUBLIC_SUPABASE_URL=' "$SITE_ENV" | cut -d= -f2- | tr -d '"'"'")
+    case "$api" in http://127.0.0.1*|http://localhost*) ;; *) echo "Refusing: Supabase URL is not local." >&2; exit 1 ;; esac
+    [ -n "$key" ] || { echo "No SUPABASE_SERVICE_ROLE_KEY in $SITE_ENV" >&2; exit 1; }
+    db <<<"insert into storage.buckets (id, name, public) values ('bot-avatars', 'bot-avatars', true) on conflict (id) do nothing;"
+    for f in "$here"/bot-avatars/*.png; do
+      name=$(basename "$f")
+      code=$(curl -s -o /dev/null -w '%{http_code}' -X POST "$api/storage/v1/object/bot-avatars/$name" \
+        -H "Authorization: Bearer $key" -H "apikey: $key" -H "Content-Type: image/png" -H "x-upsert: true" \
+        --data-binary "@$f")
+      echo "$name: $code"
+    done
+    db <<<"update public.reader_profiles set avatar_url = 'http://127.0.0.1:54321/storage/v1/object/public/bot-avatars/' || substr(username, 5) || '.png' where clerk_user_id like 'user_bot_%';" ;;
   list)
     db <<'SQL'
 select r.slug, r.status, p.username as host,
@@ -70,5 +166,67 @@ from public.chautari_rooms r left join public.reader_profiles p on p.clerk_user_
 where r.status <> 'ended' order by r.created_at desc;
 SQL
     echo "Bots: $(db -tA <<<"select string_agg(username, ', ') from public.reader_profiles where clerk_user_id like 'user_bot_%';")" ;;
+  say)
+    [ $# -ge 2 ] || usage
+    bot=$(bot_id "$2")
+    text=${3:-${SAMPLE_LINES[RANDOM % ${#SAMPLE_LINES[@]}]}}
+    push "$(say_sql "$1" "$bot" "$text")" chautari.chat && echo "said: $text" ;;
+  chatter)
+    [ $# -ge 1 ] || usage
+    count=${2:-6} secs=${3:-2}
+    mapfile -t bots < <(db -tA <<<"select clerk_user_id from public.reader_profiles where clerk_user_id like 'user_bot_%' order by username;")
+    for ((i = 0; i < count; i++)); do
+      text=${SAMPLE_LINES[i % ${#SAMPLE_LINES[@]}]}
+      push "$(say_sql "$1" "${bots[i % ${#bots[@]}]}" "$text")" chautari.chat && echo "said: $text"
+      ((i + 1 < count)) && sleep "$secs"
+    done ;;
+  unsay)
+    [ $# -ge 1 ] || usage
+    bot=""; [ $# -ge 2 ] && bot=$(bot_id "$2")
+    line=$(db -tA -v slug="$1" -v bot="$bot" <<'SQL'
+with m as (
+  select m.id, r.livekit_room from public.chautari_messages m
+  join public.chautari_rooms r on r.id = m.room_id
+  where r.slug = :'slug' and m.deleted_at is null and (:'bot' = '' or m.clerk_user_id = :'bot')
+  order by m.created_at desc limit 1
+)
+update public.chautari_messages c
+set deleted_at = now(), deleted_by = coalesce(nullif(:'bot', ''), 'bots.sh')
+from m where c.id = m.id
+returning m.livekit_room || E'\t' || json_build_object('type', 'delete', 'id', c.id)::text;
+SQL
+)
+    push "$line" chautari.chat && echo "deleted the latest message" ;;
+  clap)
+    [ $# -ge 1 ] || usage
+    bot=""; [ $# -ge 2 ] && bot=$(bot_id "$2")
+    line=$(db -tA -v slug="$1" -v bot="$bot" <<'SQL'
+select r.livekit_room || E'\t' || json_build_object(
+  'type', 'effect', 'effect', 'clap', 'by', coalesce(p.display_name, 'The host'))::text
+from public.chautari_rooms r
+left join public.reader_profiles p on p.clerk_user_id = coalesce(nullif(:'bot', ''), r.host_clerk_id)
+where r.slug = :'slug' and r.status = 'live';
+SQL
+)
+    push "$line" chautari.effect && echo "clapped" ;;
+  chat)
+    [ $# -eq 1 ] || usage
+    db -v slug="$1" <<'SQL'
+select to_char(m.created_at at time zone 'Asia/Kathmandu', 'HH24:MI:SS') as npt,
+  m.display_name as name, m.role, left(m.body, 60) as text,
+  case when m.deleted_at is not null then 'deleted' else '' end as state
+from public.chautari_messages m join public.chautari_rooms r on r.id = m.room_id
+where r.slug = :'slug' order by m.created_at desc limit 20;
+SQL
+    ;;
+  reports)
+    db <<'SQL'
+select to_char(created_at at time zone 'Asia/Kathmandu', 'Mon DD HH24:MI') as npt, source, reason, context,
+  coalesce('@' || reported_username, reported_clerk_id) as reported,
+  coalesce('@' || reporter_username, case when source = 'filter' then 'filter' end) as reporter,
+  left(coalesce(message_text, ''), 40) as message, left(coalesce(details, ''), 40) as details, status
+from public.reader_reports order by created_at desc limit 10;
+SQL
+    ;;
   *) usage ;;
 esac

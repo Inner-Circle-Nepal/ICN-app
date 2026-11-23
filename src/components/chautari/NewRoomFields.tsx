@@ -16,6 +16,7 @@ import { profileImageDataUri } from "@/features/profile/photo";
 import { bookingDays, bookingSlots, formatBooking } from "@/features/chautari/schedule";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * The optional parts of opening a Chautari room: when, a cover photo, and
@@ -237,7 +238,7 @@ export function BannerField({
           </Pressable>
         </View>
       ) : null}
-      {error ? <Text style={[styles.error, { color: palette.red }]}>{error}</Text> : null}
+      {error ? <ErrorMessage compact message={error} /> : null}
     </View>
   );
 }
@@ -343,7 +344,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     textDecorationLine: "underline",
   },
-  error: { fontFamily: fontFamilies.sansRegular, fontSize: 13, lineHeight: 19, marginTop: 10 },
 
   modRow: {
     flexDirection: "row",

@@ -27,6 +27,7 @@ import { isClerkConfigured } from "@/constants/config";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { ErrorState } from "@/components/ErrorState";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 const MAX_HEADLINE = 140;
 const MAX_STANDFIRST = 500;
@@ -274,11 +275,7 @@ function NewRoomScreenActive() {
           disabled={busy}
         />
 
-        {error ? (
-          <Text style={[styles.error, { color: palette.red }]} accessibilityRole="alert">
-            {error}
-          </Text>
-        ) : null}
+        {error ? <ErrorMessage message={error} /> : null}
 
         <Pressable
           onPress={() => void submit()}
@@ -525,7 +522,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
 
-  error: { fontFamily: fontFamilies.sansRegular, fontSize: 13, lineHeight: 19, marginTop: 14 },
 
   primary: {
     marginTop: 28,

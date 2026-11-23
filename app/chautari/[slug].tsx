@@ -36,7 +36,8 @@ import {
 } from "@/features/chautari/useChautariRoom";
 import { useActiveRoom } from "@/features/chautari/ActiveRoom";
 import { usePushNudge } from "@/features/pushNudge/context";
-import { submitContactMessage } from "@/lib/api/newsletter";
+import { ReaderApiError, sendReport } from "@/lib/api/readerProfile";
+import type { ReportReasonId, ReportTarget } from "@/features/reports/reasons";
 import { getBlockedIdentities, setBlockedIdentities } from "@/lib/storage/chautariBlocks";
 import { isClerkConfigured } from "@/constants/config";
 import { isLiveKitAvailable } from "@/lib/livekit/platform";
@@ -53,6 +54,8 @@ import { useRoomEffects } from "@/features/chautari/useRoomEffects";
 import { useMyProfile } from "@/features/profile/useMyProfile";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
+import { useToast } from "@/components/Toast";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * Inside a Chautari room — Direction B ("The dispatch").
@@ -137,6 +140,7 @@ const JOIN_REFUSALS: Record<string, { kicker: string; title: string; retry: bool
   room_full: { kicker: "Room full", title: "This room is full", retry: true },
   removed_from_room: { kicker: "Chautari", title: "You can't rejoin this room", retry: false },
   not_signed_in: { kicker: "Chautari", title: "Sign in to join", retry: true },
+  account_suspended: { kicker: "Account suspended", title: "You can't join rooms", retry: false },
 };
 
 /**
@@ -194,7 +198,7 @@ function ChautariRoomScreenActive() {
   const { isSignedIn, getToken, userId } = useAuth();
   const { user } = useUser();
 
-  const { profile } = useMyProfile();
+  const { profile, isError: profileError, refetch: refetchProfile } = useMyProfile();
   const displayName = profile?.display_name ?? null;
   const localImageUrl = profile?.avatar_url ?? (user?.hasImage ? user.imageUrl : null);
 
@@ -216,6 +220,7 @@ function ChautariRoomScreenActive() {
   const [handFallback, setHandFallback] = useState<boolean | null>(null);
   const [handBusy, setHandBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
 
   const isHost = room.role === "host";
   /*
@@ -258,7 +263,11 @@ function ChautariRoomScreenActive() {
   const lapsed = !alreadyHere && roomDetails?.status === "ended";
   // Do not join until we know the room is live. An older server without the
   // details endpoint errors here, and the join goes ahead as before.
-  const readyToJoin = alreadyHere || (!details.isLoading && !missing && !waiting && !lapsed);
+  // The server names a participant from their profile once, at join. Joining
+  // before the profile exists (a new reader still on the sign-up form)
+  // would show them as "Guest" for the whole session.
+  const readyToJoin =
+    alreadyHere || (!details.isLoading && !missing && !waiting && !lapsed && profile !== null);
 
   useEffect(() => {
     if (!liveAudioSupported || !isSignedIn || !slug || !readyToJoin) return;
@@ -314,7 +323,8 @@ function ChautariRoomScreenActive() {
         displayName,
       });
       setHandFallback(visible ? null : next);
-      setNotice(next ? "Your hand is raised. The host will see it." : null);
+      // The button itself shows it (red, pulsing); no message to read.
+      setNotice(null);
     } catch (e) {
       setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
     } finally {
@@ -330,14 +340,17 @@ function ChautariRoomScreenActive() {
           targetUserId,
           action,
         });
-        setNotice(
-          res.applied ? null : "Saved, but the change may take a moment to reach the room.",
-        );
+        if (!res.applied) {
+          toast.show({
+            icon: "info",
+            message: "Saved, but the change may take a moment to reach the room.",
+          });
+        }
       } catch (e) {
         setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
       }
     },
-    [slug],
+    [slug, toast],
   );
 
   const confirmAct = useCallback(
@@ -407,29 +420,14 @@ function ChautariRoomScreenActive() {
     });
   }, []);
 
-  const reporterEmail = user?.primaryEmailAddress?.emailAddress ?? "";
-  const sendReport = useCallback(
-    (person: { name: string; identity: string }, reason: string, chatText?: string) => {
-      void submitContactMessage({
-        name: displayName ?? "Chautari listener",
-        email: reporterEmail,
-        topic: "Chautari report",
-        message: [
-          `Reason: ${reason}`,
-          `Room: ${slug}`,
-          `Reported: ${person.name} (${person.identity})`,
-          ...(chatText ? [`Chat message: "${chatText}"`] : []),
-        ].join("\n"),
-      }).then((res) =>
-        setNotice(
-          res.ok
-            ? "Thank you. The newsroom will review this report within 24 hours."
-            : res.message,
-        ),
+  // Reports go to the newsroom's review queue; the server attaches the evidence.
+  const report = useCallback((target: ReportTarget, reason: ReportReasonId, details: string) => {
+    void sendReport(getTokenRef.current, target, reason, details)
+      .then((message) => toast.show({ icon: "check", message }))
+      .catch((e: unknown) =>
+        setNotice(e instanceof ReaderApiError ? e.message : "Your report wasn't sent. Try again."),
       );
-    },
-    [displayName, reporterEmail, slug],
-  );
+  }, [toast]);
 
   /*
    * Tap a person: their sheet. Host controls for the host; block and report
@@ -661,6 +659,18 @@ function ChautariRoomScreenActive() {
     );
   }
 
+  if (!alreadyHere && profileError) {
+    return (
+      <Shell onBack={back} onShare={null} title={title}>
+        <ErrorState
+          title="Could not load your profile"
+          message="Your name in the room comes from your profile. Check your connection and try again."
+          onRetry={() => void refetchProfile()}
+        />
+      </Shell>
+    );
+  }
+
   if (room.phase === "left") {
     return <Shell onBack={back} onShare={null} title={title} />;
   }
@@ -789,60 +799,18 @@ function ChautariRoomScreenActive() {
             ) : null}
 
             {room.micError ? (
-              <View style={[styles.notice, { borderLeftColor: palette.red }]}>
-                <Text
-                  style={[styles.noticeText, { color: palette.ink }]}
-                  accessibilityRole="alert"
-                >
-                  {room.micError}
-                </Text>
-                <View style={styles.noticeActions}>
-                  {room.micBlocked ? (
-                    <Pressable
-                      onPress={() => void Linking.openSettings()}
-                      accessibilityRole="button"
-                      accessibilityLabel="Open app settings to allow the microphone"
-                      style={({ pressed }) => [
-                        styles.noticeBtn,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Text style={[styles.noticeBtnText, { color: palette.ink }]}>
-                        Open settings
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                  <Pressable
-                    onPress={room.dismissMicError}
-                    accessibilityRole="button"
-                    accessibilityLabel="Dismiss this message"
-                    style={({ pressed }) => [styles.noticeBtn, pressed && styles.pressed]}
-                  >
-                    <Text style={[styles.noticeBtnText, { color: palette.quiet }]}>
-                      Dismiss
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
+              <ErrorMessage
+                message={room.micError}
+                action={
+                  room.micBlocked
+                    ? { label: "Open settings", onPress: () => void Linking.openSettings() }
+                    : undefined
+                }
+                onDismiss={room.dismissMicError}
+              />
             ) : null}
 
-            {notice ? (
-              <View style={[styles.notice, { borderLeftColor: palette.rule2 }]}>
-                <Text style={[styles.noticeText, { color: palette.quiet }]}>{notice}</Text>
-                <View style={styles.noticeActions}>
-                  <Pressable
-                    onPress={() => setNotice(null)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Dismiss this message"
-                    style={({ pressed }) => [styles.noticeBtn, pressed && styles.pressed]}
-                  >
-                    <Text style={[styles.noticeBtnText, { color: palette.quiet }]}>
-                      Dismiss
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            ) : null}
+            {notice ? <ErrorMessage message={notice} onDismiss={() => setNotice(null)} /> : null}
 
             {speakers.length > 0 ? (
               <>
@@ -900,7 +868,9 @@ function ChautariRoomScreenActive() {
         onClose={() => setSheetIdentity(null)}
         onAct={confirmAct}
         onToggleBlock={toggleBlock}
-        onReport={sendReport}
+        onReport={(member, reason, details) =>
+          report({ kind: "person", clerkId: member.identity, roomSlug: slug }, reason, details)
+        }
         onViewProfile={viewProfile}
       />
 
@@ -927,8 +897,8 @@ function ChautariRoomScreenActive() {
         myRole={room.role ? chatRole : null}
         canWrite={canChat}
         onBlock={(message) => toggleBlock({ identity: message.authorId })}
-        onReport={(message, reason) =>
-          sendReport({ name: message.name, identity: message.authorId }, reason, message.text)
+        onReport={(message, reason, details) =>
+          report({ kind: "message", messageId: message.id, roomSlug: slug }, reason, details)
         }
         cannotWriteReason={
           isSignedIn ? "Join the room to chat." : "Sign in to join the chat."
@@ -1220,17 +1190,6 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
 
-  notice: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 14 },
-  noticeText: { fontFamily: fontFamilies.sansRegular, fontSize: 12.5, lineHeight: 18 },
-  noticeActions: { flexDirection: "row", alignItems: "center", gap: 16, marginTop: 2 },
-  noticeBtn: { minHeight: 44, justifyContent: "center" },
-  noticeBtnText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11,
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-    textDecorationLine: "underline",
-  },
 
   sectionHeader: {
     flexDirection: "row",

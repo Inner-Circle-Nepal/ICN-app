@@ -49,6 +49,7 @@ import {
   syncPushRegistrationOnResume,
 } from "@/lib/notifications/push";
 import { deepLinkToRouterPath, resolveDeepLink } from "@/utils/deepLinks";
+import { ToastProvider } from "@/components/Toast";
 
 LogBox.ignoreLogs(["Invalid DOM property `transform-origin`"]);
 
@@ -303,7 +304,9 @@ export default function RootLayout() {
         <BookmarksProvider>
           <ActiveRoomProvider>
             <PushNudgeProvider>
-              <AppShell />
+              <ToastProvider>
+                <AppShell />
+              </ToastProvider>
             </PushNudgeProvider>
           </ActiveRoomProvider>
         </BookmarksProvider>

@@ -12,6 +12,9 @@ import {
 } from "@/features/profile/useFollow";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
+import type { ReportReasonId } from "@/features/reports/reasons";
+import { ActionRow, type ActionRowProps } from "./ActionRow";
+import { ReportForm } from "./ReportForm";
 import { Avatar } from "./Avatar";
 import { BottomSheet } from "./BottomSheet";
 import { FollowAlertPrompt } from "@/components/FollowAlertPrompt";
@@ -26,18 +29,7 @@ import { FollowAlertPrompt } from "@/components/FollowAlertPrompt";
  * left out rather than shown disabled.
  */
 
-export const REPORT_REASONS = [
-  "Abusive or hateful",
-  "Harassment",
-  "Spam or scam",
-  "Something else",
-] as const;
-
-type Row = {
-  label: string;
-  onPress: () => void;
-  danger?: boolean;
-};
+type Row = ActionRowProps;
 
 export function PersonSheet({
   member,
@@ -59,7 +51,7 @@ export function PersonSheet({
   onClose: () => void;
   onAct: (member: RoomMember, action: ModerationAction) => void;
   onToggleBlock: (member: RoomMember) => void;
-  onReport: (member: RoomMember, reason: string) => void;
+  onReport: (member: RoomMember, reason: ReportReasonId, details: string) => void;
   onViewProfile: (username: string) => void;
 }) {
   const { palette } = useTheme();
@@ -148,22 +140,12 @@ export function PersonSheet({
             onDone={() => setAskingAlerts(false)}
           />
         ) : reporting ? (
-          <>
-            <Text style={[styles.kicker, { color: palette.quiet }]}>Report {member.name}</Text>
-            <Text style={[styles.reportTitle, { color: palette.ink }]}>
-              Why are you reporting them?
-            </Text>
-            <View style={[styles.rows, { borderTopColor: palette.rule }]}>
-              {REPORT_REASONS.map((reason) => (
-                <ActionRow
-                  key={reason}
-                  label={reason}
-                  onPress={then(() => onReport(member, reason))}
-                />
-              ))}
-              <ActionRow label="Back" muted onPress={() => setReporting(false)} />
-            </View>
-          </>
+          <ReportForm
+            heading={`Report ${member.name}`}
+            question="Why are you reporting them?"
+            onSubmit={(reason, details) => then(() => onReport(member, reason, details))()}
+            onBack={() => setReporting(false)}
+          />
         ) : (
           <>
             <View style={styles.identity}>
@@ -278,36 +260,6 @@ export function PersonSheet({
   );
 }
 
-export function ActionRow({
-  label,
-  onPress,
-  danger = false,
-  muted = false,
-}: Row & { muted?: boolean }) {
-  const { palette } = useTheme();
-  return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      style={({ pressed }) => [
-        styles.row,
-        { borderBottomColor: palette.rule },
-        pressed && { backgroundColor: palette.paper2 },
-      ]}
-    >
-      <Text
-        style={[
-          styles.rowText,
-          { color: danger ? palette.red : muted ? palette.quiet : palette.ink },
-        ]}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   identity: { flexDirection: "row", alignItems: "center", gap: 14 },
   identityText: { flex: 1, minWidth: 0 },
@@ -340,19 +292,5 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
   },
   rows: { borderTopWidth: 1, marginTop: 18 },
-  row: { minHeight: 50, justifyContent: "center", borderBottomWidth: 1 },
-  rowText: { fontFamily: fontFamilies.sansRegular, fontSize: 15.5 },
-  kicker: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 10.5,
-    letterSpacing: 1.4,
-    textTransform: "uppercase",
-  },
-  reportTitle: {
-    fontFamily: fontFamilies.serifLight,
-    fontSize: 24,
-    lineHeight: 29,
-    marginTop: 6,
-  },
   pressed: { opacity: 0.75 },
 });

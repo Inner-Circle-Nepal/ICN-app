@@ -20,6 +20,7 @@ import {
   validateDisplayName,
   validateUsername,
 } from "./validators";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * The mandatory signup gate that fires after a Clerk OTP success for any
@@ -244,14 +245,7 @@ export function ProfileCompletionScreen({ onComplete }: { onComplete?: () => voi
           )}
         </Pressable>
 
-        {submitError ? (
-          <Text
-            style={[styles.error, { color: palette.red }]}
-            accessibilityLiveRegion="polite"
-          >
-            {submitError}
-          </Text>
-        ) : null}
+        {submitError ? <ErrorMessage message={submitError} /> : null}
       </ScrollView>
     </KeyboardAvoidingView>
   );

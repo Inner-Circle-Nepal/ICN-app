@@ -1,4 +1,5 @@
 import { SITE_URL } from "@/constants/config";
+import { reportBody, type ReportReasonId, type ReportTarget } from "@/features/reports/reasons";
 import type { GetToken } from "./chautari";
 
 /**
@@ -32,6 +33,16 @@ export type ReaderProfile = {
   created_at: string;
   updated_at: string;
 };
+
+/** Set on the reader's own profile when the newsroom has suspended them. */
+export type MySuspension = {
+  /** The server's wording: the reason, that reading still works, how to appeal. */
+  message: string;
+  since: string;
+};
+
+/** `GET /profile/me`: the profile plus the reader's own suspension, if any. */
+export type MyProfile = ReaderProfile & { suspension: MySuspension | null };
 
 export type ProfilePatch = Partial<Pick<ReaderProfile, "display_name" | "bio" | "avatar_url">>;
 
@@ -148,13 +159,17 @@ async function call<T>(
 /*  Profile                                                                    */
 /* -------------------------------------------------------------------------- */
 
-export async function getMyProfile(getToken: GetToken): Promise<ReaderProfile | null> {
-  const res = await call<{ profile: ReaderProfile }>(
+export async function getMyProfile(getToken: GetToken): Promise<MyProfile | null> {
+  const res = await call<{ profile: ReaderProfile; suspension?: MySuspension | null }>(
     "/api/reader/profile/me",
     { method: "GET" },
     { getToken, nullOn: 404 },
   );
-  return res?.profile ?? null;
+  if (!res?.profile) return null;
+  const s = res.suspension;
+  const suspension =
+    s && typeof s.message === "string" ? { message: s.message, since: String(s.since ?? "") } : null;
+  return { ...res.profile, suspension };
 }
 
 export async function createProfile(
@@ -286,4 +301,28 @@ export async function unlinkPushToken(getToken: GetToken, token: string): Promis
     { method: "DELETE", body: JSON.stringify({ token }) },
     { getToken },
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Reports                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Report a chat message, a person in a room, or a profile. The server copies
+ * the evidence into the newsroom's report queue; the reply is the thank-you
+ * line to show. Throws ReaderApiError (`cannot_report_self`, `not_found`,
+ * `account_suspended`, 429 when sending too many).
+ */
+export async function sendReport(
+  getToken: GetToken,
+  target: ReportTarget,
+  reason: ReportReasonId,
+  details: string,
+): Promise<string> {
+  const res = await call<{ message?: string }>(
+    "/api/reader/report",
+    { method: "POST", body: JSON.stringify(reportBody(target, reason, details)) },
+    { getToken },
+  );
+  return res?.message ?? "Thank you. The newsroom reviews every report within 24 hours.";
 }

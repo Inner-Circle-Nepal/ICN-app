@@ -32,6 +32,9 @@ import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
+import { ReaderApiError } from "@/lib/api/readerProfile";
+import { useToast } from "@/components/Toast";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
  * Your reader profile.
@@ -111,7 +114,7 @@ function ProfileScreenActive() {
    */
   const [draftDisplayName, setDraftDisplayName] = useState<string | null>(null);
   const [draftBio, setDraftBio] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const toast = useToast();
   const [error, setError] = useState<string | null>(null);
   const [subscribing, setSubscribing] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
@@ -140,7 +143,6 @@ function ProfileScreenActive() {
 
   const saveProfile = useCallback(async () => {
     if (!canSave) return;
-    setNotice(null);
     setError(null);
     try {
       const payload: { display_name?: string; bio?: string | null } = {};
@@ -154,11 +156,11 @@ function ProfileScreenActive() {
       await update.mutateAsync(payload);
       setDraftDisplayName(null);
       setDraftBio(null);
-      setNotice("Your profile has been updated.");
+      toast.show({ icon: "check", message: "Your profile has been updated." });
     } catch (e) {
       setError((e as Error).message || "Could not save your profile.");
     }
-  }, [canSave, draftBio, draftDisplayName, update]);
+  }, [canSave, draftBio, draftDisplayName, update, toast]);
 
   /**
    * Choose a new profile picture.
@@ -182,7 +184,6 @@ function ProfileScreenActive() {
    */
   const changePhoto = useCallback(async () => {
     if (!user || photoBusy) return;
-    setNotice(null);
     setError(null);
 
     const picked = await ImagePicker.launchImageLibraryAsync({
@@ -215,14 +216,19 @@ function ProfileScreenActive() {
       await user.reload();
       const url = user.hasImage ? user.imageUrl : null;
       await update.mutateAsync({ avatar_url: url });
-      setNotice("Your profile picture has been updated.");
+      toast.show({ icon: "check", message: "Your profile picture has been updated." });
     } catch (e) {
+      // Our server refusing the save (a suspended account) explains itself.
+      if (e instanceof ReaderApiError) {
+        setError(e.message);
+        return;
+      }
       const errs = (e as { errors?: { longMessage?: string; message?: string }[] })?.errors;
       setError(errs?.[0]?.longMessage || errs?.[0]?.message || "Could not upload that picture.");
     } finally {
       setPhotoBusy(false);
     }
-  }, [user, photoBusy, update]);
+  }, [user, photoBusy, update, toast]);
 
   /**
    * Remove the picture. `setProfileImage({ file: null })` is Clerk's delete;
@@ -238,33 +244,31 @@ function ProfileScreenActive() {
         style: "destructive",
         onPress: () => {
           setPhotoBusy(true);
-          setNotice(null);
           setError(null);
           void user
             .setProfileImage({ file: null })
             .then(() => update.mutateAsync({ avatar_url: null }))
-            .then(() => setNotice("Your picture has been removed."))
+            .then(() => toast.show({ icon: "check", message: "Your picture has been removed." }))
             .catch(() => setError("Could not remove that picture."))
             .finally(() => setPhotoBusy(false));
         },
       },
     ]);
-  }, [user, photoBusy, update]);
+  }, [user, photoBusy, update, toast]);
 
   const joinBriefing = useCallback(async () => {
     if (!email || subscribing) return;
     setSubscribing(true);
-    setNotice(null);
     setError(null);
     const result = await subscribeToNewsletter({
       email,
       name: headingName,
       source: "mobile-profile",
     });
-    if (result.ok) setNotice(result.message);
+    if (result.ok) toast.show({ icon: "check", message: result.message });
     else setError(result.message);
     setSubscribing(false);
-  }, [email, headingName, subscribing]);
+  }, [email, headingName, subscribing, toast]);
 
   const confirmSignOut = useCallback(() => {
     Alert.alert(
@@ -306,7 +310,6 @@ function ProfileScreenActive() {
           text: "Delete account",
           style: "destructive",
           onPress: () => {
-            setNotice(null);
             setError(null);
             void releasePushToken(getToken)
               .then(() => user.delete())
@@ -478,23 +481,7 @@ function ProfileScreenActive() {
             </View>
           </View>
 
-          {notice ? (
-            <View style={[styles.notice, { borderLeftColor: palette.rule2 }]}>
-              <Text
-                style={[styles.noticeText, { color: palette.quiet }]}
-                accessibilityRole="alert"
-              >
-                {notice}
-              </Text>
-            </View>
-          ) : null}
-          {error ? (
-            <View style={[styles.notice, { borderLeftColor: palette.red }]}>
-              <Text style={[styles.noticeText, { color: palette.ink }]} accessibilityRole="alert">
-                {error}
-              </Text>
-            </View>
-          ) : null}
+          {error ? <ErrorMessage message={error} onDismiss={() => setError(null)} /> : null}
 
           {/* ------------------------------------------------- profile */}
           <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
@@ -759,8 +746,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   email: { fontFamily: fontFamilies.sansRegular, fontSize: 12.5, marginTop: 4 },
-  notice: { borderLeftWidth: 2, paddingLeft: 10, marginTop: 18 },
-  noticeText: { fontFamily: fontFamilies.sansRegular, fontSize: 12.5, lineHeight: 18 },
   sectionLabel: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 11,

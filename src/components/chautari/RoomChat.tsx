@@ -24,7 +24,12 @@ import type { RoomChat } from "@/features/chautari/useRoomChat";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { Avatar } from "./Avatar";
-import { ActionRow, REPORT_REASONS } from "./PersonSheet";
+import type { ReportReasonId } from "@/features/reports/reasons";
+import { ActionRow } from "./ActionRow";
+import { ReportForm } from "./ReportForm";
+import { InfoIcon } from "./RoomIcons";
+import { ToastHost } from "@/components/Toast";
+import { ErrorMessage } from "@/components/ErrorMessage";
 
 /* ------------------------------------------------------------ role tag */
 
@@ -120,7 +125,7 @@ export function ChatSheet({
   cannotWriteReason: string;
   /** Block the message's author: their audio and messages, on this device. */
   onBlock: (message: ChatMessage) => void;
-  onReport: (message: ChatMessage, reason: string) => void;
+  onReport: (message: ChatMessage, reason: ReportReasonId, details: string) => void;
 }) {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
@@ -128,6 +133,8 @@ export function ChatSheet({
   // Someone else's message, long-pressed: its options replace the composer.
   const [acting, setActing] = useState<ChatMessage | null>(null);
   const [reporting, setReporting] = useState(false);
+  // The ⓘ beside the title: long-press is invisible until someone says so.
+  const [showHelp, setShowHelp] = useState(false);
 
   // Inverted list: newest first in the data, drawn at the bottom.
   const newestFirst = useMemo(() => [...chat.messages].reverse(), [chat.messages]);
@@ -183,9 +190,21 @@ export function ChatSheet({
           ]}
         >
           <View style={[styles.header, { borderBottomColor: palette.rule }]}>
-            <Text style={[styles.title, { color: palette.ink }]} accessibilityRole="header">
-              Live chat
-            </Text>
+            <View style={styles.titleRow}>
+              <Text style={[styles.title, { color: palette.ink }]} accessibilityRole="header">
+                Live chat
+              </Text>
+              <Pressable
+                onPress={() => setShowHelp((v) => !v)}
+                hitSlop={12}
+                accessibilityRole="button"
+                accessibilityLabel="How the live chat works"
+                accessibilityState={{ expanded: showHelp }}
+                style={({ pressed }) => pressed && styles.pressed}
+              >
+                <InfoIcon size={18} color={showHelp ? palette.ink : palette.quiet} />
+              </Pressable>
+            </View>
             <Pressable
               onPress={close}
               hitSlop={12}
@@ -196,77 +215,100 @@ export function ChatSheet({
             </Pressable>
           </View>
 
-          <FlatList
-            data={newestFirst}
-            inverted
-            keyExtractor={(m) => m.id}
-            style={styles.list}
-            contentContainerStyle={styles.listBody}
-            keyboardShouldPersistTaps="handled"
-            ListEmptyComponent={
+          {showHelp ? (
+            <Text
+              style={[
+                styles.help,
+                { color: palette.ink2, backgroundColor: palette.paper2, borderBottomColor: palette.rule },
+              ]}
+            >
+              {myRole === "host" || myRole === "moderator"
+                ? "Long-press a message to remove it, block its author or report it."
+                : "Long-press a message to block its author or report it."}{" "}
+              Long-press your own message to delete it. Blocking hides that person&apos;s messages
+              and voice on this phone only. Reports go to the newsroom, which reviews them within
+              24 hours.
+            </Text>
+          ) : null}
+
+          {/*
+            The empty state sits outside the list: an inverted FlatList flips
+            its content, and whether it flips the empty view too differs by
+            platform and version.
+          */}
+          {newestFirst.length === 0 ? (
+            <View style={[styles.list, styles.emptyWrap]}>
               <Text style={[styles.empty, { color: palette.quiet }]}>
                 {chat.loading
                   ? "Loading the chat…"
                   : (chat.loadError ?? "No messages yet. Be the first to say something.")}
               </Text>
-            }
-            renderItem={({ item }) => (
-              <Pressable
-                onLongPress={() => onLongPress(item)}
-                delayLongPress={350}
-                accessibilityHint={
-                  !myId
-                    ? undefined
-                    : item.authorId === myId
-                      ? "Long-press to delete your message"
-                      : "Long-press to remove, block or report"
-                }
-                style={styles.row}
-              >
-                <Avatar name={item.name} size="sm" imageUrl={item.avatarUrl} />
-                <View style={styles.rowBody}>
-                  <View style={styles.nameLine}>
-                    <Text
-                      style={[styles.name, { color: palette.quiet }]}
-                      numberOfLines={1}
-                    >
-                      {item.authorId === myId ? `${item.name} (you)` : item.name}
-                    </Text>
-                    <RoleTag role={item.role} palette={palette} />
+            </View>
+          ) : (
+            <FlatList
+              data={newestFirst}
+              inverted
+              keyExtractor={(m) => m.id}
+              style={styles.list}
+              contentContainerStyle={styles.listBody}
+              keyboardShouldPersistTaps="handled"
+              renderItem={({ item }) => (
+                <Pressable
+                  onLongPress={() => onLongPress(item)}
+                  delayLongPress={350}
+                  accessibilityHint={
+                    !myId
+                      ? undefined
+                      : item.authorId === myId
+                        ? "Long-press to delete your message"
+                        : "Long-press to remove, block or report"
+                  }
+                  style={styles.row}
+                >
+                  <Avatar name={item.name} size="sm" imageUrl={item.avatarUrl} />
+                  <View style={styles.rowBody}>
+                    <View style={styles.nameLine}>
+                      <Text
+                        style={[styles.name, { color: palette.quiet }]}
+                        numberOfLines={1}
+                      >
+                        {item.authorId === myId ? `${item.name} (you)` : item.name}
+                      </Text>
+                      <RoleTag role={item.role} palette={palette} />
+                    </View>
+                    <Text style={[styles.text, { color: palette.ink }]}>{item.text}</Text>
                   </View>
-                  <Text style={[styles.text, { color: palette.ink }]}>{item.text}</Text>
-                </View>
-              </Pressable>
-            )}
-          />
+                </Pressable>
+              )}
+            />
+          )}
 
           {chat.sendError ? (
-            <Pressable onPress={chat.clearSendError} accessibilityRole="button">
-              <Text style={[styles.error, { color: palette.red }]}>{chat.sendError}</Text>
-            </Pressable>
+            <ErrorMessage
+              compact
+              message={chat.sendError}
+              onDismiss={chat.clearSendError}
+              style={styles.error}
+            />
           ) : null}
 
           {acting ? (
             <View style={[styles.actions, { borderTopColor: palette.rule }]}>
-              <Text style={[styles.actionsKicker, { color: palette.quiet }]} numberOfLines={1}>
-                {reporting ? `Report ${acting.name}'s message` : `${acting.name}: ${acting.text}`}
-              </Text>
               {reporting ? (
-                <>
-                  {REPORT_REASONS.map((reason) => (
-                    <ActionRow
-                      key={reason}
-                      label={reason}
-                      onPress={() => {
-                        onReport(acting, reason);
-                        closeActions();
-                      }}
-                    />
-                  ))}
-                  <ActionRow label="Back" muted onPress={() => setReporting(false)} />
-                </>
+                <ReportForm
+                  heading={`Report ${acting.name}'s message`}
+                  question="Why are you reporting this message?"
+                  onSubmit={(reason, details) => {
+                    onReport(acting, reason, details);
+                    closeActions();
+                  }}
+                  onBack={() => setReporting(false)}
+                />
               ) : (
                 <>
+                  <Text style={[styles.actionsKicker, { color: palette.quiet }]} numberOfLines={1}>
+                    {acting.name}: {acting.text}
+                  </Text>
                   {canRemoveMessage({ message: acting, myId, myRole }) ? (
                     <ActionRow
                       label="Remove message"
@@ -333,6 +375,7 @@ export function ChatSheet({
           )}
         </View>
       </KeyboardAvoidingView>
+      <ToastHost />
     </Modal>
   );
 }
@@ -371,7 +414,16 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
   title: { fontFamily: fontFamilies.serifMedium, fontSize: 20 },
+  help: {
+    fontFamily: fontFamilies.sansRegular,
+    fontSize: 13,
+    lineHeight: 19,
+    paddingHorizontal: spacing.gutter,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
   close: { fontFamily: fontFamilies.sansMedium, fontSize: 13 },
 
   list: { flex: 1 },
@@ -381,9 +433,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: "center",
     paddingVertical: spacing.section,
-    // The list is inverted, so its empty view is drawn upside down.
-    transform: [{ scaleY: -1 }],
+    paddingHorizontal: spacing.gutter,
   },
+  emptyWrap: { justifyContent: "flex-end" },
   row: { flexDirection: "row", gap: spacing.sm, alignItems: "flex-start" },
   rowBody: { flex: 1 },
   nameLine: { flexDirection: "row", alignItems: "center", gap: 6 },
@@ -398,12 +450,7 @@ const styles = StyleSheet.create({
   },
   text: { fontFamily: fontFamilies.sansRegular, fontSize: 15, lineHeight: 21, marginTop: 1 },
 
-  error: {
-    fontFamily: fontFamilies.sansRegular,
-    fontSize: 13,
-    paddingHorizontal: spacing.gutter,
-    paddingBottom: spacing.xs,
-  },
+  error: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.xs },
   composer: {
     flexDirection: "row",
     alignItems: "center",

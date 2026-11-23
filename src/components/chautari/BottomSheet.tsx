@@ -14,6 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useTheme } from "@/hooks/useTheme";
 import { spacing } from "@/theme/tokens";
+import { ToastHost } from "@/components/Toast";
 
 /**
  * The paper sheet Chautari's menus slide up on: ink rule along the top, a
@@ -81,6 +82,7 @@ export function BottomSheet({
           )}
         </Animated.View>
       </KeyboardAvoidingView>
+      <ToastHost />
     </Modal>
   );
 }
