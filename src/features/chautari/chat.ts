@@ -89,6 +89,19 @@ export function applyChatPacket(
 }
 
 /**
+ * Leave out what blocked people wrote. Blocking is the reader's own choice
+ * (kept on the device, see chautariBlocks.ts): it silences a person's audio
+ * and hides their messages, without anyone else being told.
+ */
+export function withoutBlocked(
+  messages: readonly ChatMessage[],
+  blocked: ReadonlySet<string>,
+): ChatMessage[] {
+  if (blocked.size === 0) return messages as ChatMessage[];
+  return messages.filter((m) => !blocked.has(m.authorId));
+}
+
+/**
  * Whether to offer "Remove" on a message. The server decides for real; this
  * only avoids showing a button that would be refused.
  */

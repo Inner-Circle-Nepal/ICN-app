@@ -320,13 +320,17 @@ export async function moderate(
 /* -------------------------------------------------------------- live chat */
 
 /**
- * The most recent chat messages in a room, oldest first. Public: rooms are
- * open to anyone, so reading the chat needs no sign-in.
+ * The most recent chat messages in a room, oldest first. Needs a sign-in,
+ * like joining: messages carry their authors' account ids.
  */
-export async function getChat(slug: string): Promise<{ messages: ChatMessage[]; open: boolean }> {
+export async function getChat(
+  getToken: GetToken,
+  slug: string,
+): Promise<{ messages: ChatMessage[]; open: boolean }> {
   const res = await call<{ messages: ChatMessage[]; open?: boolean }>(
     `/api/chautari/chat?roomSlug=${encodeURIComponent(slug)}`,
     { method: "GET" },
+    getToken,
   );
   return { messages: res.messages ?? [], open: res.open !== false };
 }

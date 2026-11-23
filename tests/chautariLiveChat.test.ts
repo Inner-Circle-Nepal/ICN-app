@@ -7,9 +7,17 @@ import {
   charsLeft,
   decodeChatPacket,
   mergeMessages,
+  withoutBlocked,
   type ChatMessage,
 } from "@/features/chautari/chat";
-import { ChautariError, deleteChat, getChat, sendChat } from "@/lib/api/chautari";
+import { EFFECT_TOPIC, decodeEffectPacket } from "@/features/chautari/effects";
+import {
+  ChautariError,
+  deleteChat,
+  getChat,
+  playRoomEffect,
+  sendChat,
+} from "@/lib/api/chautari";
 
 /**
  * Chautari live chat. The app never broadcasts: it posts to the server and
@@ -96,6 +104,18 @@ it("counts emoji as one character", () => {
 
 /* -------------------------------------------------------------- calls */
 
+describe("withoutBlocked", () => {
+  const list = [msg("a", "2026-11-22T10:00:00Z"), msg("b", "2026-11-22T10:01:00Z", { authorId: "u2" })];
+
+  it("hides what blocked people wrote", () => {
+    expect(withoutBlocked(list, new Set(["u2"])).map((m) => m.id)).toEqual(["a"]);
+  });
+
+  it("returns the same list when nobody is blocked", () => {
+    expect(withoutBlocked(list, new Set())).toBe(list);
+  });
+});
+
 function reply(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -113,12 +133,14 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("chat API calls", () => {
-  it("reads history without a session", async () => {
+  it("reads history with the session", async () => {
     fetchMock.mockResolvedValue(reply({ ok: true, messages: [], open: true }));
-    await getChat("tea talk");
+    await getChat(token, "tea talk");
     const [url, init] = fetchMock.mock.calls[0];
     expect(String(url)).toContain("/api/chautari/chat?roomSlug=tea%20talk");
-    expect((init as RequestInit).headers).not.toHaveProperty("authorization");
+    expect((init as RequestInit).headers).toMatchObject({
+      authorization: "Bearer clerk_session_token_abc",
+    });
   });
 
   it("sends with the session and returns the stored message", async () => {
@@ -152,9 +174,6 @@ describe("chat API calls", () => {
 });
 
 /* ------------------------------------------------------ sound effects */
-
-import { EFFECT_TOPIC, decodeEffectPacket } from "@/features/chautari/effects";
-import { playRoomEffect } from "@/lib/api/chautari";
 
 describe("applause packets", () => {
   it("reads a clap with who triggered it", () => {

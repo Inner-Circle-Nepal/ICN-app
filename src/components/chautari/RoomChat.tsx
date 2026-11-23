@@ -24,6 +24,7 @@ import type { RoomChat } from "@/features/chautari/useRoomChat";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { Avatar } from "./Avatar";
+import { ActionRow, REPORT_REASONS } from "./PersonSheet";
 
 /* ------------------------------------------------------------ role tag */
 
@@ -93,7 +94,9 @@ export function ChatStrip({
 
 /**
  * The chat itself, like the chat beside a live stream: newest at the bottom,
- * a field to write in, and a long-press to remove a message for whoever may.
+ * a field to write in. Long-press your own message to delete it; long-press
+ * anyone else's to remove it (host and moderators), block its author or
+ * report it (App Store guideline 1.2: every user must be able to).
  */
 export function ChatSheet({
   visible,
@@ -103,6 +106,8 @@ export function ChatSheet({
   myRole,
   canWrite,
   cannotWriteReason,
+  onBlock,
+  onReport,
 }: {
   visible: boolean;
   onClose: () => void;
@@ -113,10 +118,16 @@ export function ChatSheet({
   canWrite: boolean;
   /** Shown in place of the field when `canWrite` is false. */
   cannotWriteReason: string;
+  /** Block the message's author: their audio and messages, on this device. */
+  onBlock: (message: ChatMessage) => void;
+  onReport: (message: ChatMessage, reason: string) => void;
 }) {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState("");
+  // Someone else's message, long-pressed: its options replace the composer.
+  const [acting, setActing] = useState<ChatMessage | null>(null);
+  const [reporting, setReporting] = useState(false);
 
   // Inverted list: newest first in the data, drawn at the bottom.
   const newestFirst = useMemo(() => [...chat.messages].reverse(), [chat.messages]);
@@ -129,32 +140,38 @@ export function ChatSheet({
     if (ok) setDraft("");
   };
 
-  const askRemove = (message: ChatMessage) => {
-    if (!canRemoveMessage({ message, myId, myRole })) return;
-    const own = message.authorId === myId;
-    Alert.alert(
-      own ? "Delete your message?" : `Remove ${message.name}'s message?`,
-      message.text,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: own ? "Delete" : "Remove",
-          style: "destructive",
-          onPress: () => void chat.remove(message.id),
-        },
-      ],
-    );
+  const closeActions = () => {
+    setActing(null);
+    setReporting(false);
+  };
+
+  const onLongPress = (message: ChatMessage) => {
+    if (!myId) return;
+    if (message.authorId !== myId) {
+      setReporting(false);
+      setActing(message);
+      return;
+    }
+    Alert.alert("Delete your message?", message.text, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Delete", style: "destructive", onPress: () => void chat.remove(message.id) },
+    ]);
+  };
+
+  const close = () => {
+    closeActions();
+    onClose();
   };
 
   if (!visible) return null;
 
   return (
-    <Modal visible transparent animationType="slide" onRequestClose={onClose}>
+    <Modal visible transparent animationType="slide" onRequestClose={close}>
       <KeyboardAvoidingView
         style={styles.frame}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        <Pressable style={styles.backdrop} onPress={onClose} accessibilityLabel="Close chat" />
+        <Pressable style={styles.backdrop} onPress={close} accessibilityLabel="Close chat" />
         <View
           style={[
             styles.sheet,
@@ -170,7 +187,7 @@ export function ChatSheet({
               Live chat
             </Text>
             <Pressable
-              onPress={onClose}
+              onPress={close}
               hitSlop={12}
               accessibilityRole="button"
               accessibilityLabel="Close chat"
@@ -195,12 +212,14 @@ export function ChatSheet({
             }
             renderItem={({ item }) => (
               <Pressable
-                onLongPress={() => askRemove(item)}
+                onLongPress={() => onLongPress(item)}
                 delayLongPress={350}
                 accessibilityHint={
-                  canRemoveMessage({ message: item, myId, myRole })
-                    ? "Long-press to remove this message"
-                    : undefined
+                  !myId
+                    ? undefined
+                    : item.authorId === myId
+                      ? "Long-press to delete your message"
+                      : "Long-press to remove, block or report"
                 }
                 style={styles.row}
               >
@@ -227,7 +246,51 @@ export function ChatSheet({
             </Pressable>
           ) : null}
 
-          {canWrite ? (
+          {acting ? (
+            <View style={[styles.actions, { borderTopColor: palette.rule }]}>
+              <Text style={[styles.actionsKicker, { color: palette.quiet }]} numberOfLines={1}>
+                {reporting ? `Report ${acting.name}'s message` : `${acting.name}: ${acting.text}`}
+              </Text>
+              {reporting ? (
+                <>
+                  {REPORT_REASONS.map((reason) => (
+                    <ActionRow
+                      key={reason}
+                      label={reason}
+                      onPress={() => {
+                        onReport(acting, reason);
+                        closeActions();
+                      }}
+                    />
+                  ))}
+                  <ActionRow label="Back" muted onPress={() => setReporting(false)} />
+                </>
+              ) : (
+                <>
+                  {canRemoveMessage({ message: acting, myId, myRole }) ? (
+                    <ActionRow
+                      label="Remove message"
+                      danger
+                      onPress={() => {
+                        void chat.remove(acting.id);
+                        closeActions();
+                      }}
+                    />
+                  ) : null}
+                  <ActionRow
+                    label={`Block ${acting.name}`}
+                    danger
+                    onPress={() => {
+                      onBlock(acting);
+                      closeActions();
+                    }}
+                  />
+                  <ActionRow label="Report message" onPress={() => setReporting(true)} />
+                  <ActionRow label="Cancel" muted onPress={closeActions} />
+                </>
+              )}
+            </View>
+          ) : canWrite ? (
             <View style={[styles.composer, { borderTopColor: palette.rule }]}>
               <TextInput
                 value={draft}
@@ -357,6 +420,16 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     paddingHorizontal: spacing.md,
     paddingVertical: Platform.OS === "ios" ? 10 : 6,
+  },
+  actions: {
+    paddingHorizontal: spacing.gutter,
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+  },
+  actionsKicker: {
+    fontFamily: fontFamilies.sansMedium,
+    fontSize: 12,
+    paddingBottom: spacing.xs,
   },
   count: { fontFamily: fontFamilies.sansRegular, fontSize: 12, minWidth: 24, textAlign: "right" },
   send: { paddingHorizontal: spacing.lg, paddingVertical: 10, borderRadius: 20 },

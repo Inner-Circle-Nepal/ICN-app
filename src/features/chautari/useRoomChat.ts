@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChautariError, deleteChat, getChat, sendChat, type GetToken } from "@/lib/api/chautari";
-import { applyChatPacket, mergeMessages, type ChatMessage } from "./chat";
+import { applyChatPacket, mergeMessages, withoutBlocked, type ChatMessage } from "./chat";
 import type { ChautariRoomState } from "./useChautariRoom";
 
 export interface RoomChat {
+  /** What the reader sees: everything except what blocked people wrote. */
   messages: ChatMessage[];
   /** History is loading for the first time. */
   loading: boolean;
@@ -50,8 +51,16 @@ function sendErrorText(e: unknown): string {
  * signal, sees what was said. Everything after that arrives as packets the
  * server pushes into the room (`room.onChatPacket`). The two overlap on
  * purpose and `mergeMessages` removes the duplicates.
+ *
+ * Messages from people the reader has blocked are kept but not shown or
+ * counted, so unblocking brings them back.
  */
-export function useRoomChat(slug: string, room: ChautariRoomState, getToken: GetToken): RoomChat {
+export function useRoomChat(
+  slug: string,
+  room: ChautariRoomState,
+  getToken: GetToken,
+  blocked: ReadonlySet<string>,
+): RoomChat {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -59,6 +68,13 @@ export function useRoomChat(slug: string, room: ChautariRoomState, getToken: Get
   const [sendError, setSendError] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const openRef = useRef(false);
+  const blockedRef = useRef(blocked);
+  // Clerk's getToken is not a stable reference; history loads only on (re)connect.
+  const getTokenRef = useRef(getToken);
+  useEffect(() => {
+    blockedRef.current = blocked;
+    getTokenRef.current = getToken;
+  }, [blocked, getToken]);
 
   const connected = room.phase === "connected";
   const { onChatPacket } = room;
@@ -78,7 +94,7 @@ export function useRoomChat(slug: string, room: ChautariRoomState, getToken: Get
     const load = async () => {
       setLoading(true);
       try {
-        const res = await getChat(slug);
+        const res = await getChat(getTokenRef.current, slug);
         if (cancelled) return;
         setMessages((current) => mergeMessages(current, res.messages));
         setLoadError(null);
@@ -98,7 +114,13 @@ export function useRoomChat(slug: string, room: ChautariRoomState, getToken: Get
     () =>
       onChatPacket((packet) => {
         setMessages((current) => applyChatPacket(current, packet));
-        if (packet.type === "message" && !openRef.current) setUnread((n) => n + 1);
+        if (
+          packet.type === "message" &&
+          !openRef.current &&
+          !blockedRef.current.has(packet.message.authorId)
+        ) {
+          setUnread((n) => n + 1);
+        }
       }),
     [onChatPacket],
   );
@@ -139,9 +161,10 @@ export function useRoomChat(slug: string, room: ChautariRoomState, getToken: Get
   }, []);
 
   const clearSendError = useCallback(() => setSendError(null), []);
+  const visible = useMemo(() => withoutBlocked(messages, blocked), [messages, blocked]);
 
   return {
-    messages,
+    messages: visible,
     loading,
     loadError,
     sending,

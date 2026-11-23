@@ -26,7 +26,7 @@ import { FollowAlertPrompt } from "@/components/FollowAlertPrompt";
  * left out rather than shown disabled.
  */
 
-const REPORT_REASONS = [
+export const REPORT_REASONS = [
   "Abusive or hateful",
   "Harassment",
   "Spam or scam",
@@ -278,7 +278,7 @@ export function PersonSheet({
   );
 }
 
-function ActionRow({
+export function ActionRow({
   label,
   onPress,
   danger = false,

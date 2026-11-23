@@ -396,11 +396,12 @@ function ChautariRoomScreenActive() {
     setRoomBlocked(blocked);
   }, [blocked, setRoomBlocked]);
 
-  const toggleBlock = useCallback((member: RoomMember) => {
+  // Takes a member from the stage or the author of a chat message alike.
+  const toggleBlock = useCallback((person: { identity: string }) => {
     setBlockedState((prev) => {
       const next = new Set(prev);
-      if (next.has(member.identity)) next.delete(member.identity);
-      else next.add(member.identity);
+      if (next.has(person.identity)) next.delete(person.identity);
+      else next.add(person.identity);
       void setBlockedIdentities(next);
       return next;
     });
@@ -408,7 +409,7 @@ function ChautariRoomScreenActive() {
 
   const reporterEmail = user?.primaryEmailAddress?.emailAddress ?? "";
   const sendReport = useCallback(
-    (member: RoomMember, reason: string) => {
+    (person: { name: string; identity: string }, reason: string, chatText?: string) => {
       void submitContactMessage({
         name: displayName ?? "Chautari listener",
         email: reporterEmail,
@@ -416,7 +417,8 @@ function ChautariRoomScreenActive() {
         message: [
           `Reason: ${reason}`,
           `Room: ${slug}`,
-          `Reported: ${member.name} (${member.identity})`,
+          `Reported: ${person.name} (${person.identity})`,
+          ...(chatText ? [`Chat message: "${chatText}"`] : []),
         ].join("\n"),
       }).then((res) =>
         setNotice(
@@ -459,7 +461,7 @@ function ChautariRoomScreenActive() {
   const [handsOpen, setHandsOpen] = useState(false);
 
   /* Live chat: history on join, then whatever the server pushes into the room. */
-  const chat = useRoomChat(slug, room, getToken);
+  const chat = useRoomChat(slug, room, getToken, blocked);
   const [chatOpen, setChatOpen] = useState(false);
   const openChat = () => {
     chat.setOpen(true);
@@ -924,6 +926,10 @@ function ChautariRoomScreenActive() {
         myId={userId ?? null}
         myRole={room.role ? chatRole : null}
         canWrite={canChat}
+        onBlock={(message) => toggleBlock({ identity: message.authorId })}
+        onReport={(message, reason) =>
+          sendReport({ name: message.name, identity: message.authorId }, reason, message.text)
+        }
         cannotWriteReason={
           isSignedIn ? "Join the room to chat." : "Sign in to join the chat."
         }
