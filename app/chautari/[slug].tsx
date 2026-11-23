@@ -20,6 +20,7 @@ import {
   endRoom,
   getRoomDetails,
   moderate,
+  playRoomEffect,
   setHandRaised,
   startRoom,
   type ModerationAction,
@@ -46,6 +47,9 @@ import { RoomControls } from "@/components/chautari/RoomControls";
 import { InviteSheet } from "@/components/chautari/InviteSheet";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
+import { ChatSheet, ChatStrip } from "@/components/chautari/RoomChat";
+import { useRoomChat } from "@/features/chautari/useRoomChat";
+import { useRoomEffects } from "@/features/chautari/useRoomEffects";
 import { useMyProfile } from "@/features/profile/useMyProfile";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -113,6 +117,8 @@ const IDLE_ROOM: ChautariRoomState = {
   toggleMic: noop,
   retry: noop,
   setBlocked: noop,
+  onChatPacket: () => noop,
+  onEffectPacket: () => noop,
 };
 
 function isRoomNotFound(e: unknown): boolean {
@@ -185,7 +191,7 @@ function ChautariRoomScreenActive() {
 
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
-  const { isSignedIn, getToken } = useAuth();
+  const { isSignedIn, getToken, userId } = useAuth();
   const { user } = useUser();
 
   const { profile } = useMyProfile();
@@ -390,11 +396,12 @@ function ChautariRoomScreenActive() {
     setRoomBlocked(blocked);
   }, [blocked, setRoomBlocked]);
 
-  const toggleBlock = useCallback((member: RoomMember) => {
+  // Takes a member from the stage or the author of a chat message alike.
+  const toggleBlock = useCallback((person: { identity: string }) => {
     setBlockedState((prev) => {
       const next = new Set(prev);
-      if (next.has(member.identity)) next.delete(member.identity);
-      else next.add(member.identity);
+      if (next.has(person.identity)) next.delete(person.identity);
+      else next.add(person.identity);
       void setBlockedIdentities(next);
       return next;
     });
@@ -402,7 +409,7 @@ function ChautariRoomScreenActive() {
 
   const reporterEmail = user?.primaryEmailAddress?.emailAddress ?? "";
   const sendReport = useCallback(
-    (member: RoomMember, reason: string) => {
+    (person: { name: string; identity: string }, reason: string, chatText?: string) => {
       void submitContactMessage({
         name: displayName ?? "Chautari listener",
         email: reporterEmail,
@@ -410,7 +417,8 @@ function ChautariRoomScreenActive() {
         message: [
           `Reason: ${reason}`,
           `Room: ${slug}`,
-          `Reported: ${member.name} (${member.identity})`,
+          `Reported: ${person.name} (${person.identity})`,
+          ...(chatText ? [`Chat message: "${chatText}"`] : []),
         ].join("\n"),
       }).then((res) =>
         setNotice(
@@ -451,6 +459,35 @@ function ChautariRoomScreenActive() {
     [room.members],
   );
   const [handsOpen, setHandsOpen] = useState(false);
+
+  /* Live chat: history on join, then whatever the server pushes into the room. */
+  const chat = useRoomChat(slug, room, getToken, blocked);
+  const [chatOpen, setChatOpen] = useState(false);
+  const openChat = () => {
+    chat.setOpen(true);
+    setChatOpen(true);
+  };
+  const closeChat = () => {
+    chat.setOpen(false);
+    setChatOpen(false);
+  };
+  const chatRole = isHost ? "host" : isModerator ? "moderator" : room.canPublish ? "speaker" : "listener";
+  const canChat = Boolean(isSignedIn) && room.phase === "connected";
+
+  /* Applause: the host or a moderator asks the server; every app plays it. */
+  const effectLine = useRoomEffects(room);
+  const [clapBusy, setClapBusy] = useState(false);
+  const clap = async () => {
+    if (clapBusy) return;
+    setClapBusy(true);
+    try {
+      await playRoomEffect(getToken, slug, "clap");
+    } catch (e) {
+      setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
+    } finally {
+      setClapBusy(false);
+    }
+  };
 
   // Invite people: the host or a moderator, booked or live. Nobody running
   // the room is offered, nor the reader themselves.
@@ -882,6 +919,30 @@ function ChautariRoomScreenActive() {
         onDecline={(m) => confirmAct(m, "deny_speaker")}
       />
 
+      <ChatSheet
+        visible={chatOpen}
+        onClose={closeChat}
+        chat={chat}
+        myId={userId ?? null}
+        myRole={room.role ? chatRole : null}
+        canWrite={canChat}
+        onBlock={(message) => toggleBlock({ identity: message.authorId })}
+        onReport={(message, reason) =>
+          sendReport({ name: message.name, identity: message.authorId }, reason, message.text)
+        }
+        cannotWriteReason={
+          isSignedIn ? "Join the room to chat." : "Sign in to join the chat."
+        }
+      />
+
+      {effectLine ? (
+        <View style={[styles.effectLine, { backgroundColor: palette.ink }]} pointerEvents="none">
+          <Text style={[styles.effectLineText, { color: palette.paper }]}>👏 {effectLine}</Text>
+        </View>
+      ) : null}
+
+      {room.phase === "connected" ? <ChatStrip chat={chat} onOpen={openChat} /> : null}
+
       <RoomControls
         isHost={isHost}
         canModerate={canModerate}
@@ -895,6 +956,8 @@ function ChautariRoomScreenActive() {
         handRaised={handRaised}
         handBusy={handBusy}
         onToggleHand={() => void toggleHand()}
+        onClap={() => void clap()}
+        clapBusy={clapBusy}
         connected={room.phase === "connected"}
         insetsBottom={insets.bottom}
       />
@@ -1056,6 +1119,14 @@ function SectionHeader({
 /* ------------------------------------------------------------------- styles */
 
 const styles = StyleSheet.create({
+  effectLine: {
+    alignSelf: "center",
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginBottom: 8,
+  },
+  effectLineText: { fontFamily: fontFamilies.sansMedium, fontSize: 13 },
   inviteLink: { alignSelf: "flex-start", marginTop: 12 },
   inviteLinkText: {
     fontFamily: fontFamilies.sansMedium,

@@ -4,7 +4,8 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
  * Chautari participants this reader has blocked, by LiveKit identity.
  *
  * Kept on the device: blocking is the reader's own choice about what they
- * hear, so it needs no server round trip and works in every room. The
+ * hear and read (audio and chat messages), so it needs no server round trip
+ * and works in every room. The
  * identity is the Clerk user id the token endpoint assigns, so a block
  * follows the person between rooms and survives a display-name change.
  */
