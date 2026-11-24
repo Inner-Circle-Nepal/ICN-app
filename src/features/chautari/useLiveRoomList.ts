@@ -1,4 +1,5 @@
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
+import { AppState } from "react-native";
 import { useFocusEffect } from "expo-router";
 import { useQueryClient, type QueryKey } from "@tanstack/react-query";
 
@@ -12,43 +13,76 @@ const EVENT = "room_status";
 const COALESCE_MS = 500;
 
 /**
- * Keep the Chautari room list current: a database trigger broadcasts on a
- * public Realtime channel whenever a room is created, goes live or ends, and
- * this refetches the list the moment that happens instead of waiting for the
- * one-minute poll (which stays as the fallback).
+ * Keep the Chautari room list current everywhere in the app (the tab icon
+ * pulses while anything is live): a database trigger broadcasts on a public
+ * Realtime channel whenever a room is created, goes live or ends, and this
+ * refetches the list about half a second later.
  *
- * Only while the screen is focused: tabs stay mounted, and an idle Realtime
- * connection for every reader anywhere in the app would count against the
- * project's concurrent-connection limit. Coming back to the tab refetches,
- * so nothing missed while away lingers.
+ * Listens only while the app is in the foreground: each open app holds one
+ * Realtime connection, which counts against the Supabase project's
+ * concurrent-connection limit (see the vault's Future changes). In the
+ * background the connection is dropped; coming back
+ * refetches at once and listens again, so nothing missed lingers. The poll
+ * on the query stays as the fallback. Mount once (BottomNav).
  */
-export function useLiveRoomList(queryKey: QueryKey): void {
+export function useLiveRoomUpdates(queryKey: QueryKey): void {
   const queryClient = useQueryClient();
 
-  useFocusEffect(
-    useCallback(() => {
-      void queryClient.invalidateQueries({ queryKey });
+  useEffect(() => {
+    const sb = getPublicSupabase();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let channel: ReturnType<NonNullable<typeof sb>["channel"]> | null = null;
 
-      const sb = getPublicSupabase();
-      if (!sb) return undefined;
+    const refetch = () => void queryClient.invalidateQueries({ queryKey });
 
-      let timer: ReturnType<typeof setTimeout> | null = null;
-      const channel = sb
+    const listen = () => {
+      if (!sb || channel) return;
+      channel = sb
         .channel(CHANNEL)
         .on("broadcast", { event: EVENT }, () => {
           if (timer) return;
           timer = setTimeout(() => {
             timer = null;
-            void queryClient.invalidateQueries({ queryKey });
+            refetch();
           }, COALESCE_MS);
         })
         .subscribe();
+    };
 
-      return () => {
-        if (timer) clearTimeout(timer);
-        void sb.removeChannel(channel);
-      };
-      // Pass a key defined once at module level, so this doesn't resubscribe.
+    const stop = () => {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      if (sb && channel) void sb.removeChannel(channel);
+      channel = null;
+    };
+
+    if (AppState.currentState === "active") listen();
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") {
+        refetch();
+        listen();
+      } else if (next === "background") {
+        stop();
+      }
+    });
+
+    return () => {
+      sub.remove();
+      stop();
+    };
+    // Pass a key defined once at module level, so this doesn't resubscribe.
+  }, [queryClient, queryKey]);
+}
+
+/**
+ * On the Chautari tab: refetch whenever the tab comes into focus. The live
+ * updates themselves come from useLiveRoomUpdates, mounted app-wide.
+ */
+export function useLiveRoomList(queryKey: QueryKey): void {
+  const queryClient = useQueryClient();
+  useFocusEffect(
+    useCallback(() => {
+      void queryClient.invalidateQueries({ queryKey });
     }, [queryClient, queryKey]),
   );
 }

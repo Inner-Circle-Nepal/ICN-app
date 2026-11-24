@@ -10,6 +10,7 @@
 #   npm run bots -- list                             rooms and bots
 #   npm run bots -- avatars                          upload the bots' profile pictures (after a db reset)
 #   npm run bots -- staff                            local newsroom login staff@local.test / staff1234 (superadmin)
+#   npm run bots -- join <slug> [bot…]               bots sit in a live room as listeners until Ctrl-C (default: all)
 #
 #   Live chat and applause (the room must be live and you must be in it):
 #   npm run bots -- say <slug> <bot> [text]          a bot writes in the chat
@@ -228,5 +229,28 @@ select to_char(created_at at time zone 'Asia/Kathmandu', 'Mon DD HH24:MI') as np
 from public.reader_reports order by created_at desc limit 10;
 SQL
     ;;
+  join)
+    [ $# -ge 1 ] || usage
+    slug=$1; shift
+    ids=()
+    if [ $# -eq 0 ]; then
+      mapfile -t ids < <(db -tA <<<"select clerk_user_id from public.reader_profiles where clerk_user_id like 'user_bot_%' order by username;")
+    else
+      for b in "$@"; do ids+=("$(bot_id "$b")"); done
+    fi
+    lk=$(db -tA -v slug="$slug" <<<"select livekit_room from public.chautari_rooms where slug = :'slug' and status = 'live';")
+    [ -n "$lk" ] || { echo "No live room called $slug." >&2; exit 1; }
+    # The LiveKit client lives in its own folder, installed on first use.
+    [ -d "$here/livekit-bots/node_modules/@livekit/rtc-node" ] ||
+      npm install --prefix "$here/livekit-bots" --no-audit --no-fund >/dev/null || exit 1
+    # Not the host: a bot hosting this room would also be its host on screen.
+    db -tA -F $'\t' -v ids="$(IFS=,; echo "${ids[*]}")" -v slug="$slug" <<'SQL' |
+select p.clerk_user_id, coalesce(p.display_name, p.username), p.username, coalesce(p.avatar_url, '')
+from public.reader_profiles p
+where p.clerk_user_id = any(string_to_array(:'ids', ','))
+  and p.clerk_user_id <> (select host_clerk_id from public.chautari_rooms where slug = :'slug');
+SQL
+      node "$here/livekit-bots/join.mjs" "$lk" "$SITE_ENV" 2>&1 |
+      grep --line-buffered -v -e '^{"level"' -e 'Decoder is supported' ;;
   *) usage ;;
 esac

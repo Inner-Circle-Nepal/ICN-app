@@ -258,6 +258,9 @@ function ChautariRoomScreenActive() {
     refetchInterval: (q) => (q.state.data?.room.status === "scheduled" ? 20_000 : false),
   });
   const roomDetails = details.data?.room ?? null;
+  // The list passes the host's name along; a room opened any other way (just
+  // created, a link, a notification) gets it from the room's details.
+  const hostName = hintedHost ?? roomDetails?.host.name ?? null;
   const missing = !alreadyHere && isRoomNotFound(details.error);
   const waiting = !alreadyHere && roomDetails?.status === "scheduled";
   const lapsed = !alreadyHere && roomDetails?.status === "ended";
@@ -760,15 +763,32 @@ function ChautariRoomScreenActive() {
                 transition={150}
               />
             ) : null}
-            <Text style={[styles.headline, { color: palette.ink }]}>{title}</Text>
+            <View style={styles.headlineRow}>
+              <Text style={[styles.headline, { color: palette.ink }]}>{title}</Text>
+              {canModerate ? (
+                <Pressable
+                  onPress={() => setInviteOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Invite people to this room"
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.inviteBtn,
+                    { borderColor: palette.rule2 },
+                    pressed && styles.inviteBtnPressed,
+                  ]}
+                >
+                  <InvitePersonIcon color={palette.ink} />
+                </Pressable>
+              ) : null}
+            </View>
 
-            {hintedHost || room.role ? (
+            {hostName || room.role ? (
               <View style={styles.identityRow}>
-                {hintedHost ? (
+                {hostName ? (
                   <Text style={[styles.hostLine, { color: palette.ink2 }]} numberOfLines={1}>
                     Hosted by{" "}
                     <Text style={[styles.hostLineName, { color: palette.ink }]}>
-                      {hintedHost}
+                      {hostName}
                     </Text>
                   </Text>
                 ) : (
@@ -782,20 +802,6 @@ function ChautariRoomScreenActive() {
                   </View>
                 ) : null}
               </View>
-            ) : null}
-
-            {canModerate ? (
-              <Pressable
-                onPress={() => setInviteOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Invite people to this room"
-                hitSlop={8}
-                style={styles.inviteLink}
-              >
-                <Text style={[styles.inviteLinkText, { color: palette.ink }]}>
-                  Invite people
-                </Text>
-              </Pressable>
             ) : null}
 
             {room.micError ? (
@@ -1002,6 +1008,22 @@ function Shell({
   );
 }
 
+/** A person with a plus: invite someone. Drawn to match the top bar's 1.6 strokes. */
+function InvitePersonIcon({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM3.5 20c0-3.6 2.9-6 6.5-6 1.5 0 2.9.4 4 1.2"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M18 14v6M15 17h6" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+    </Svg>
+  );
+}
+
 /* --------------------------------------------------------------- Live chyron */
 
 function LiveChyron({
@@ -1097,14 +1119,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   effectLineText: { fontFamily: fontFamilies.sansMedium, fontSize: 13 },
-  inviteLink: { alignSelf: "flex-start", marginTop: 12 },
-  inviteLinkText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11,
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-    textDecorationLine: "underline",
-  },
   screen: { flex: 1 },
 
   topBar: {
@@ -1162,7 +1176,19 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     aspectRatio: 16 / 9,
   },
+  headlineRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  inviteBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  inviteBtnPressed: { opacity: 0.6 },
   headline: {
+    flex: 1,
     fontFamily: fontFamilies.serifLight,
     fontSize: 26,
     lineHeight: 31,
