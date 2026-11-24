@@ -48,6 +48,13 @@ import { RoomControls } from "@/components/chautari/RoomControls";
 import { InviteSheet } from "@/components/chautari/InviteSheet";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
+import { GiftSheet } from "@/components/chautari/GiftSheet";
+import { GiftBurst } from "@/components/chautari/GiftBurst";
+import { SupportersSheet } from "@/components/chautari/SupportersSheet";
+import { SupportersStrip } from "@/components/chautari/SupportersStrip";
+import { useRoomSupporters } from "@/features/chautari/useRoomSupporters";
+import { useRoomGifts } from "@/features/chautari/useRoomGifts";
+import { useWallet } from "@/features/wallet/useWallet";
 import { ChatSheet, ChatStrip } from "@/components/chautari/RoomChat";
 import { useRoomChat } from "@/features/chautari/useRoomChat";
 import { useRoomEffects } from "@/features/chautari/useRoomEffects";
@@ -122,6 +129,7 @@ const IDLE_ROOM: ChautariRoomState = {
   setBlocked: noop,
   onChatPacket: () => noop,
   onEffectPacket: () => noop,
+  onGiftPacket: () => noop,
 };
 
 function isRoomNotFound(e: unknown): boolean {
@@ -258,6 +266,9 @@ function ChautariRoomScreenActive() {
     refetchInterval: (q) => (q.state.data?.room.status === "scheduled" ? 20_000 : false),
   });
   const roomDetails = details.data?.room ?? null;
+  // The list passes the host's name along; a room opened any other way (just
+  // created, a link, a notification) gets it from the room's details.
+  const hostName = hintedHost ?? roomDetails?.host.name ?? null;
   const missing = !alreadyHere && isRoomNotFound(details.error);
   const waiting = !alreadyHere && roomDetails?.status === "scheduled";
   const lapsed = !alreadyHere && roomDetails?.status === "ended";
@@ -486,6 +497,14 @@ function ChautariRoomScreenActive() {
       setClapBusy(false);
     }
   };
+
+  /* Gifts: anyone but the host, once the server has gifts switched on. */
+  const wallet = useWallet();
+  const shownGift = useRoomGifts(room);
+  const supporters = useRoomSupporters(slug, room);
+  const [supportersOpen, setSupportersOpen] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const canGift = Boolean(isSignedIn) && !isHost && wallet.data?.giftsEnabled === true;
 
   // Invite people: the host or a moderator, booked or live. Nobody running
   // the room is offered, nor the reader themselves.
@@ -760,15 +779,32 @@ function ChautariRoomScreenActive() {
                 transition={150}
               />
             ) : null}
-            <Text style={[styles.headline, { color: palette.ink }]}>{title}</Text>
+            <View style={styles.headlineRow}>
+              <Text style={[styles.headline, { color: palette.ink }]}>{title}</Text>
+              {canModerate ? (
+                <Pressable
+                  onPress={() => setInviteOpen(true)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Invite people to this room"
+                  hitSlop={6}
+                  style={({ pressed }) => [
+                    styles.inviteBtn,
+                    { borderColor: palette.rule2 },
+                    pressed && styles.inviteBtnPressed,
+                  ]}
+                >
+                  <InvitePersonIcon color={palette.ink} />
+                </Pressable>
+              ) : null}
+            </View>
 
-            {hintedHost || room.role ? (
+            {hostName || room.role ? (
               <View style={styles.identityRow}>
-                {hintedHost ? (
+                {hostName ? (
                   <Text style={[styles.hostLine, { color: palette.ink2 }]} numberOfLines={1}>
                     Hosted by{" "}
                     <Text style={[styles.hostLineName, { color: palette.ink }]}>
-                      {hintedHost}
+                      {hostName}
                     </Text>
                   </Text>
                 ) : (
@@ -784,19 +820,10 @@ function ChautariRoomScreenActive() {
               </View>
             ) : null}
 
-            {canModerate ? (
-              <Pressable
-                onPress={() => setInviteOpen(true)}
-                accessibilityRole="button"
-                accessibilityLabel="Invite people to this room"
-                hitSlop={8}
-                style={styles.inviteLink}
-              >
-                <Text style={[styles.inviteLinkText, { color: palette.ink }]}>
-                  Invite people
-                </Text>
-              </Pressable>
-            ) : null}
+            <SupportersStrip
+              supporters={supporters.data?.supporters ?? []}
+              onPress={() => setSupportersOpen(true)}
+            />
 
             {room.micError ? (
               <ErrorMessage
@@ -889,6 +916,22 @@ function ChautariRoomScreenActive() {
         onDecline={(m) => confirmAct(m, "deny_speaker")}
       />
 
+      <SupportersSheet
+        visible={supportersOpen}
+        onClose={() => setSupportersOpen(false)}
+        data={supporters.data}
+        isLoading={supporters.isLoading}
+        isError={supporters.isError}
+        onRetry={() => void supporters.refetch()}
+      />
+
+      <GiftSheet
+        visible={giftOpen && canGift}
+        onClose={() => setGiftOpen(false)}
+        roomSlug={slug}
+        hostName={roomDetails?.host.name ?? null}
+      />
+
       <ChatSheet
         visible={chatOpen}
         onClose={closeChat}
@@ -911,6 +954,8 @@ function ChautariRoomScreenActive() {
         </View>
       ) : null}
 
+      {shownGift ? <GiftBurst key={shownGift.key} gift={shownGift} /> : null}
+
       {room.phase === "connected" ? <ChatStrip chat={chat} onOpen={openChat} /> : null}
 
       <RoomControls
@@ -928,6 +973,7 @@ function ChautariRoomScreenActive() {
         onToggleHand={() => void toggleHand()}
         onClap={() => void clap()}
         clapBusy={clapBusy}
+        onGift={canGift ? () => setGiftOpen(true) : undefined}
         connected={room.phase === "connected"}
         insetsBottom={insets.bottom}
       />
@@ -999,6 +1045,22 @@ function Shell({
       </View>
       {children}
     </View>
+  );
+}
+
+/** A person with a plus: invite someone. Drawn to match the top bar's 1.6 strokes. */
+function InvitePersonIcon({ color }: { color: string }) {
+  return (
+    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M10 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM3.5 20c0-3.6 2.9-6 6.5-6 1.5 0 2.9.4 4 1.2"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <Path d="M18 14v6M15 17h6" stroke={color} strokeWidth={1.6} strokeLinecap="round" />
+    </Svg>
   );
 }
 
@@ -1097,14 +1159,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   effectLineText: { fontFamily: fontFamilies.sansMedium, fontSize: 13 },
-  inviteLink: { alignSelf: "flex-start", marginTop: 12 },
-  inviteLinkText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11,
-    letterSpacing: 1.1,
-    textTransform: "uppercase",
-    textDecorationLine: "underline",
-  },
   screen: { flex: 1 },
 
   topBar: {
@@ -1162,7 +1216,19 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     aspectRatio: 16 / 9,
   },
+  headlineRow: { flexDirection: "row", alignItems: "flex-start", gap: 12 },
+  inviteBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: 1,
+  },
+  inviteBtnPressed: { opacity: 0.6 },
   headline: {
+    flex: 1,
     fontFamily: fontFamilies.serifLight,
     fontSize: 26,
     lineHeight: 31,

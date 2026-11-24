@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { ChautariError, deleteChat, getChat, sendChat, type GetToken } from "@/lib/api/chautari";
-import { applyChatPacket, mergeMessages, withoutBlocked, type ChatMessage } from "./chat";
+import {
+  applyChatPacket,
+  mergeMessages,
+  normaliseMessage,
+  withoutBlocked,
+  type ChatMessage,
+} from "./chat";
+import { giftMessage } from "./gifts";
 import type { ChautariRoomState } from "./useChautariRoom";
 
 export interface RoomChat {
@@ -79,7 +86,7 @@ export function useRoomChat(
   }, [blocked, getToken]);
 
   const connected = room.phase === "connected";
-  const { onChatPacket } = room;
+  const { onChatPacket, onGiftPacket } = room;
 
   // A different room starts from an empty chat.
   const [shownSlug, setShownSlug] = useState(slug);
@@ -98,7 +105,7 @@ export function useRoomChat(
       try {
         const res = await getChat(getTokenRef.current, slug);
         if (cancelled) return;
-        setMessages((current) => mergeMessages(current, res.messages));
+        setMessages((current) => mergeMessages(current, res.messages.map(normaliseMessage)));
         setLoadError(null);
       } catch {
         if (!cancelled) setLoadError("Couldn't load earlier messages.");
@@ -125,6 +132,16 @@ export function useRoomChat(
         }
       }),
     [onChatPacket],
+  );
+
+  // Gifts join the timeline too (the card is the announcement, so no unread).
+  useEffect(
+    () =>
+      onGiftPacket((packet) => {
+        const entry = giftMessage(packet);
+        if (entry) setMessages((current) => mergeMessages(current, [entry]));
+      }),
+    [onGiftPacket],
   );
 
   const send = useCallback(

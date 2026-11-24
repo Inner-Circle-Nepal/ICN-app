@@ -6,6 +6,7 @@ import Svg, { Path } from "react-native-svg";
 import { useBookmarks } from "@/features/bookmarks/BookmarksContext";
 import { usePushNudge } from "@/features/pushNudge/context";
 import { useQuery } from "@tanstack/react-query";
+import { useLiveRoomUpdates } from "@/features/chautari/useLiveRoomList";
 import { discoverRooms } from "@/lib/api/chautari";
 import { ChautariTabIcon } from "./ChautariTabIcon";
 import { useTheme } from "@/hooks/useTheme";
@@ -19,6 +20,9 @@ import { fontFamilies } from "@/theme/tokens";
  */
 
 const ICON = 24;
+
+/** Shared with the Chautari tab's list (same key there). */
+const CHAUTARI_ROOMS_KEY = ["chautari-rooms"] as const;
 
 const TAB_ROUTES = new Set(["/", "/explore", "/chautari", "/bookmarks", "/settings"]);
 
@@ -34,14 +38,18 @@ export function BottomNav() {
    * Is anything live in Chautari? Shares the lobby's query, so opening the
    * tab costs no extra request and the two never disagree. A failed fetch
    * just leaves the icon still.
+   *
+   * Updated within about a second by the Realtime listener below (while the
+   * app is in the foreground); the poll is only the fallback.
    */
   const chautari = useQuery({
-    queryKey: ["chautari-rooms"],
+    queryKey: CHAUTARI_ROOMS_KEY,
     queryFn: discoverRooms,
     staleTime: 30 * 1000,
-    refetchInterval: 90 * 1000,
+    refetchInterval: 60 * 1000,
     retry: 0,
   });
+  useLiveRoomUpdates(CHAUTARI_ROOMS_KEY);
   const liveRooms = (chautari.data ?? []).filter((r) => r.status === "live").length;
 
   /*

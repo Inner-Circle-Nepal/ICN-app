@@ -5,6 +5,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useUser } from "@clerk/clerk-expo";
 import Svg, { Path } from "react-native-svg";
 
+import { EarningsSection } from "@/components/chautari/EarningsSection";
 import { isClerkConfigured } from "@/constants/config";
 import {
   buildRequirements,
@@ -44,10 +45,17 @@ function EarnScreenWithClerk() {
   const verified = isLoaded && user
     ? isAccountVerified({ emails: user.emailAddresses, phones: user.phoneNumbers })
     : false;
-  return <EarnScreenBody verified={verified} />;
+  return <EarnScreenBody verified={verified} earnings={user ? <EarningsSection /> : null} />;
 }
 
-function EarnScreenBody({ verified }: { verified: boolean }) {
+function EarnScreenBody({
+  verified,
+  earnings = null,
+}: {
+  verified: boolean;
+  /** "Your earnings", for a signed-in reader. */
+  earnings?: React.ReactNode;
+}) {
   const router = useRouter();
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
@@ -103,6 +111,8 @@ function EarnScreenBody({ verified }: { verified: boolean }) {
         <Text style={[styles.standfirst, { color: palette.quiet }]}>
           What the programme asks of hosts, and what we can show you today.
         </Text>
+
+        {earnings}
 
         {/* Table header — the two columns the requirement rows will fill. */}
         <View

@@ -326,3 +326,96 @@ export async function sendReport(
   );
   return res?.message ?? "Thank you. The newsroom reviews every report within 24 hours.";
 }
+
+/* -------------------------------------------------------------------------- */
+/*  Coins                                                                      */
+/* -------------------------------------------------------------------------- */
+
+export type CoinPackInfo = { productId: string; coins: number };
+export type GiftInfo = { id: string; name: string; nameNe: string | null; coins: number };
+
+export type Wallet = {
+  /** Everything spendable, test coins included. */
+  coins: number;
+  /** The sandbox part of `coins`: non-zero only for testers and App Review. */
+  testCoins: number;
+  /** Points from gifts received; real money owed later. */
+  points: number;
+  /** Points from test gifts; never paid. */
+  testPoints: number;
+  packs: CoinPackInfo[];
+  gifts: GiftInfo[];
+  giftsEnabled: boolean;
+};
+
+/** The caller's coins and points, the coin packs and the gift catalogue. */
+export async function getWallet(getToken: GetToken): Promise<Wallet> {
+  const res = await call<Wallet & { ok: true }>("/api/reader/wallet", { method: "GET" }, { getToken });
+  const { ok: _ok, ...wallet } = res!;
+  return wallet;
+}
+
+/** A host's earnings: balances from the wallet, breakdowns from gifts received. */
+export interface Earnings {
+  points: number;
+  /** From test coins; never paid. */
+  testPoints: number;
+  gifts: number;
+  rooms: {
+    slug: string;
+    title: string;
+    at: string;
+    gifts: number;
+    points: number;
+    testPoints: number;
+    supporters: number;
+  }[];
+  supporters: {
+    name: string;
+    username: string | null;
+    avatarUrl: string | null;
+    points: number;
+    testPoints: number;
+  }[];
+}
+
+export async function getEarnings(getToken: GetToken): Promise<Earnings> {
+  const res = await call<Earnings & { ok: true }>("/api/reader/earnings", { method: "GET" }, { getToken });
+  const { ok: _ok, ...earnings } = res!;
+  return earnings;
+}
+
+export type ConfirmResult = {
+  results: { transactionId: string; status: string }[];
+  balance: number;
+};
+
+/**
+ * Ask the server to credit purchases now (it verifies each id with
+ * RevenueCat). Safe to repeat: a purchase is credited once however often
+ * it is confirmed.
+ */
+export async function confirmPurchases(
+  getToken: GetToken,
+  transactionIds: string[],
+): Promise<ConfirmResult> {
+  const res = await call<ConfirmResult & { ok: true }>(
+    "/api/payments/confirm",
+    { method: "POST", body: JSON.stringify({ transactionIds }) },
+    { getToken },
+  );
+  return { results: res!.results, balance: res!.balance };
+}
+
+/**
+ * Have the server credit any of the reader's purchases it hasn't yet. It
+ * asks RevenueCat for this reader's purchases itself; the app sends nothing.
+ */
+export async function syncPurchases(getToken: GetToken): Promise<ConfirmResult> {
+  const res = await call<ConfirmResult & { ok: true }>(
+    "/api/payments/confirm",
+    { method: "POST", body: JSON.stringify({ sync: true }) },
+    { getToken },
+  );
+  return { results: res!.results, balance: res!.balance };
+}

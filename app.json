@@ -157,7 +157,8 @@
         {
           "enableBackgroundPlayback": false
         }
-      ]
+      ],
+      "expo-localization"
     ],
     "experiments": {
       "typedRoutes": false

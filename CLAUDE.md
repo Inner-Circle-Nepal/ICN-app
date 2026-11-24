@@ -11,8 +11,10 @@ npm run start              # Metro (dev client), against production
 npm run start:local        # Metro against the local backend (see "Local backend" below)
 npm run adb:reverse        # forward the phone's local ports over USB (re-run after any replug)
 npm run bots -- <cmd>      # local bot rooms: live <bot> | book <bot> [min] | golive <slug> | end <slug> | list | avatars (re-upload their pictures after a db reset)
+                           # join <slug> [bot…]: bots sit in your live room as listeners until Ctrl-C (LiveKit client in supabase/scripts/livekit-bots/, installed on first use)
                            # staff: local newsroom login staff@local.test / staff1234 (superadmin), re-run after a db reset
                            # chat/applause (join from the phone first): say <slug> <bot> [text] | chatter <slug> [n] | unsay <slug> [bot] | clap <slug> [bot] | chat <slug> | reports
+                           # coins/gifts (test coins, local only): coins <username> [n] | gift <slug> <bot> [gift] | wallet <username>
 npm run check              # typecheck + lint + test: run before calling work done
 npm run typecheck          # tsc --noEmit
 npm run lint               # eslint
@@ -105,7 +107,7 @@ Vault note 22 explains the whole path.
 
 ### Native-module seams
 
-Some native modules are missing in Expo Go or on web, and importing them at module scope crashes the whole app. They are reached through guarded seams: `src/lib/notifications/module.ts` (expo-notifications), `src/lib/audio/module.ts` (expo-audio, the Chautari clap sound), and `src/lib/livekit/platform.ts` vs `platform.native.ts` (Metro picks per platform). Keep new uses behind these.
+Some native modules are missing in Expo Go or on web, and importing them at module scope crashes the whole app. They are reached through guarded seams: `src/lib/notifications/module.ts` (expo-notifications), `src/lib/audio/module.ts` (expo-audio, the Chautari clap sound), `src/lib/billing/module.ts` (react-native-purchases), and `src/lib/livekit/platform.ts` vs `platform.native.ts` (Metro picks per platform). Keep new uses behind these.
 
 ### Push notifications
 
@@ -153,6 +155,10 @@ Behaviour that spans the site repo, Supabase and the app. Change both sides toge
 | People search, @handle dropdowns | Supabase RPC `search_reader_profiles` (anon key; `supabase/legacy-migrations/20261118_reader_profile_search.sql`) | `readerSearch.ts` |
 | Chautari | Site `/api/chautari/*` at `CHAUTARI_API_URL` (Clerk bearer) | `chautari.ts` |
 | Reports | Site `POST /api/reader/report` (Clerk bearer) | `readerProfile.ts` |
+| Coins: wallet, confirming a purchase | Site `GET /api/reader/wallet`, `POST /api/payments/confirm` (Clerk bearer) | `readerProfile.ts` |
+| Buying coins | RevenueCat SDK (`react-native-purchases`), only through `src/lib/billing/` | `billing` |
+| Gifts | Site `POST /api/chautari/gift` (Clerk bearer) | `chautari.ts` |
+| Host earnings (points, per room, top supporters) | Site `GET /api/reader/earnings` (Clerk bearer) | `readerProfile.ts`, shown on `app/chautari/earn.tsx` |
 
 Site routes the app does **not** use (web or staff only): `ads/*`, `cron/*` (digest, forex, timesheets; guarded by `CRON_SECRET`), `edition`, `market/nepse`, `newsletter/unsubscribe`, `push/subscribe` (Web Push for browsers), `reader/newsletter`, `reader/preferences` (edition stored in Clerk `publicMetadata`), `search`, `track`, and everything under `/admin`.
 
@@ -181,8 +187,18 @@ Tables (`site/supabase/2026-10-chautari.sql`, plus the moderators and scheduling
 - **Lifecycle**: `scheduled` → `live` via `POST /rooms/start` (host or an assigned moderator, no need to be present; a conditional update so a double tap starts once) → `ended` via `DELETE /rooms?slug=` (which also cancels a scheduled room). `POST /token` refuses a scheduled room with `room_not_started` (409). A booking unstarted 3 h after `scheduled_for` counts as expired: hidden from `discover` and `mine`, reported as `ended` by `GET /rooms/[slug]`, and refused by `start`.
 - **Creating a room** (`POST /rooms`): optional `scheduledFor` (5 min to 30 days ahead), `bannerUrl` (must be a URL returned by `POST /banner`, checked against our bucket prefix), `moderators` (up to 3 @usernames, each must have a profile). Pre-assigned moderators are participant rows with `role = moderator` and `left_at` set, so they hold the role without counting as present.
 - **Banners** (`POST /banner`): base64 photo in, resized by `sharp` to a 1200×675 JPEG with EXIF stripped, stored in the public `chautari-banners` bucket, public URL out. Rate limited.
-- **Listing**: `GET /discover` (public) returns live rooms and unexpired bookings with `bannerUrl`, `hostUsername`, `hostAvatarUrl` and counts. The Chautari tab refetches it the moment a room is created, goes live or ends: a trigger (`site/supabase/2026-11-chautari-live-list.sql`) broadcasts `{ slug, status }` on the public Realtime channel `chautari-rooms` (event `room_status`), which `useLiveRoomList` listens to only while the tab is focused; the 60 s poll stays as the fallback. `GET /rooms/[slug]` (public) returns details, host and moderators, plus `canStart` when signed in. `GET /rooms/mine` lists live and scheduled rooms the caller hosts or moderates.
+- **Listing**: `GET /discover` (public) returns live rooms and unexpired bookings with `bannerUrl`, `hostUsername`, `hostAvatarUrl` and counts. The Chautari tab refetches it the moment a room is created, goes live or ends: a trigger (`site/supabase/2026-11-chautari-live-list.sql`) broadcasts `{ slug, status }` on the public Realtime channel `chautari-rooms` (event `room_status`), which `useLiveRoomUpdates` (mounted once in `BottomNav`, so the tab icon pulses within about a second) listens to while the app is in the foreground, dropping the connection in the background and refetching on return; the 60 s poll stays as the fallback. Each foreground app holds one Supabase Realtime connection. `GET /rooms/[slug]` (public) returns details, host and moderators, plus `canStart` when signed in. `GET /rooms/mine` lists live and scheduled rooms the caller hosts or moderates.
 - **Push**: a room changing to `live` (including from `scheduled`) fires `send-chautari-live-push` through the `chautari_rooms` database webhook. It alerts only the host's followers with `notify` on, on phones linked to them with Chautari alerts on. There is no "every room" alert.
+
+### Coins, gifts and the listening log
+
+Phase 1 (testers only); the roadmap and open items are in the vault's `Future changes/07-chautari-gifts-and-creator-rewards.md`, the concepts in note 29.
+- **Buying.** Coin packs are consumable store products (`coins_100`, `coins_500`, `coins_1000`) sold through RevenueCat. Screens use only `src/lib/billing` (`BillingProvider`); `revenueCat.ts` is the one file that touches the SDK, so replacing RevenueCat is one file plus a server adapter. Keys: `EXPO_PUBLIC_REVENUECAT_TEST_KEY` (Test Store, development builds only, from `local-backend.env`), `EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `_ANDROID_KEY` (production project). `keys.ts` refuses a Test Store key outside development. `BillingIdentity` (in `_layout.tsx`) logs the buyer in under their Clerk id.
+- **Crediting.** Only the server adds coins. After a purchase the app sends the store transaction id to `POST /api/payments/confirm`; the site looks it up at RevenueCat (v2 secret key, read-only: `customer_information:purchases:read` and `project_configuration:products:read`, because purchase records name RevenueCat's `prod…` id, not `coins_500`), checks it belongs to the caller, and credits it. Opening the coin shop may send `{ sync: true }` instead, but only when `src/features/wallet/syncPolicy.ts` says so (a purchase on this phone wasn't confirmed, or a day has passed): the server lists the reader's purchases at RevenueCat, skips those already in `store_purchases` (one query), and credits the rest (the SDK's on-phone purchase history uses `o1_…` ids the REST API can't look up, so the phone never sends those). RevenueCat's webhook (`POST /api/payments/revenuecat`, checked against `REVENUECAT_WEBHOOK_AUTH`) is the backstop and the only path for refunds. Both go through `applyPurchaseEvent` (site `src/lib/payments/`), keyed on the store's transaction id, so a purchase is credited once.
+- **Ledger** (site `supabase/2026-11-chautari-coins.sql`, local copy `supabase/migrations/20261125000000_chautari_coins.sql`): `coin_packs` and `gift_catalog` (the server decides coins and prices in coins), `store_purchases`, `chautari_gifts`, append-only double-entry `ledger_transactions` / `ledger_postings`, and `coin_wallets` as the cached balance. All writes go through SQL functions (`credit_store_purchase`, `refund_store_purchase`, `send_gift`, `adjust_coins`) that only the service role can call.
+- **Test coins.** Sandbox and Test Store purchases are test coins (the flag comes from the store, never the app). A gift is paid in one kind only; a test gift shows in the room like any other but adds only to the host's `test_points`, never payable.
+- **Gifts** (`POST /api/chautari/gift { roomSlug, giftId, requestId }`): anyone in a live room except the host, who receives them (`decideGift`; refusals `gifts_disabled`, `room_ended`, `room_not_started`, `cannot_gift_self`, `removed_from_room`, `not_in_room`; then `insufficient_coins` 402, `gift_unavailable`). `requestId` is a fresh UUID per tap, reused on retry. Off unless the site has `CHAUTARI_GIFTS=open`. Rate limited, failing closed. The server then sends a `chautari.gift` packet (no price, no test flag).
+- **Listening log** (site `supabase/2026-11-chautari-listen-log.sql`): `chautari_listen_sessions`, one row per LiveKit connection, written by the LiveKit webhook from its own timestamps; `chautari_join_context` holds what the app sent with its join request (`X-ICN-Install-Id` from `src/lib/storage/installId.ts`, platform, version, `X-ICN-Region` from the phone's region setting). Never in LiveKit metadata. No scoring yet.
 
 ### Reports, word filter and suspensions
 

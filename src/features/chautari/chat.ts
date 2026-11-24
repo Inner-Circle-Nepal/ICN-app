@@ -26,6 +26,8 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
   sentAt: string;
+  /** Set when the entry is a gift, not typed text (see `giftMessage`). Never the price. */
+  gift?: { giftId: string; name: string; nameNe: string | null };
 }
 
 export type ChatPacket =
@@ -42,6 +44,20 @@ function isMessage(v: unknown): v is ChatMessage {
     typeof m.text === "string" &&
     typeof m.sentAt === "string"
   );
+}
+
+function giftOf(v: unknown): ChatMessage["gift"] {
+  if (!v || typeof v !== "object") return undefined;
+  const g = v as Record<string, unknown>;
+  if (typeof g.giftId !== "string" || typeof g.name !== "string") return undefined;
+  return { giftId: g.giftId, name: g.name, nameNe: typeof g.nameNe === "string" ? g.nameNe : null };
+}
+
+/** A history entry from the server, with `gift` kept only when well-formed. */
+export function normaliseMessage(m: ChatMessage): ChatMessage {
+  const gift = giftOf((m as { gift?: unknown }).gift);
+  const { gift: _ignored, ...rest } = m;
+  return gift ? { ...rest, gift } : rest;
 }
 
 /** Parse a LiveKit data payload; null for anything that is not a chat packet. */

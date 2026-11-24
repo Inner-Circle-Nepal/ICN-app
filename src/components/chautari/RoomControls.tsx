@@ -32,6 +32,7 @@ export function RoomControls({
   onToggleHand,
   onClap,
   clapBusy = false,
+  onGift,
   connected,
   insetsBottom,
 }: {
@@ -51,6 +52,8 @@ export function RoomControls({
   /** Host or moderator: applause everyone in the room hears. */
   onClap?: () => void;
   clapBusy?: boolean;
+  /** Anyone but the host, when gifts are on: opens the gift sheet. */
+  onGift?: () => void;
   connected: boolean;
   insetsBottom: number;
 }) {
@@ -134,6 +137,28 @@ export function RoomControls({
               👏
             </Text>
           )}
+        </Pressable>
+      ) : null}
+
+      {onGift ? (
+        <Pressable
+          onPress={() => {
+            tick();
+            onGift();
+          }}
+          disabled={!connected}
+          accessibilityRole="button"
+          accessibilityLabel="Send the host a gift"
+          accessibilityState={{ disabled: !connected }}
+          style={({ pressed }) => [
+            styles.round,
+            { borderColor: palette.rule2, opacity: connected ? 1 : 0.4 },
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={styles.clap} accessible={false}>
+            🎁
+          </Text>
         </Pressable>
       ) : null}
 

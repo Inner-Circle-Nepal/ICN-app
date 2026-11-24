@@ -20,6 +20,7 @@ import {
   type ChatMessage,
   type ChatRole,
 } from "@/features/chautari/chat";
+import { giftArt } from "@/features/chautari/gifts";
 import type { RoomChat } from "@/features/chautari/useRoomChat";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
@@ -82,7 +83,11 @@ export function ChatStrip({
     >
       <Text style={[styles.stripLabel, { color: palette.ink }]}>Live chat</Text>
       <Text style={[styles.stripPreview, { color: palette.quiet }]} numberOfLines={1}>
-        {latest ? `${latest.name}: ${latest.text}` : "Say something to the room"}
+        {latest
+          ? latest.gift
+            ? `${giftArt(latest.gift.giftId)} ${latest.name} sent a ${latest.gift.name}`
+            : `${latest.name}: ${latest.text}`
+          : "Say something to the room"}
       </Text>
       {chat.unread > 0 ? (
         <View style={[styles.badge, { backgroundColor: palette.red }]}>
@@ -92,6 +97,34 @@ export function ChatStrip({
         </View>
       ) : null}
     </Pressable>
+  );
+}
+
+/**
+ * A gift in the chat: one quiet line, set apart from what people typed (no
+ * avatar or bubble, smaller, muted), so the room's record of who gifted reads
+ * in time order without crowding the conversation. Never the price, and no
+ * long-press actions: there is nothing to delete or report in a gift.
+ */
+function GiftLine({
+  message,
+  gift,
+  palette,
+}: {
+  message: ChatMessage;
+  gift: NonNullable<ChatMessage["gift"]>;
+  palette: ThemePalette;
+}) {
+  return (
+    <View style={styles.giftRow} accessible accessibilityLabel={`${message.name} sent a ${gift.name}`}>
+      <View style={styles.giftArtBox}>
+        <Text style={styles.giftArt}>{giftArt(gift.giftId)}</Text>
+      </View>
+      <Text style={[styles.giftText, { color: palette.quiet }]}>
+        <Text style={[styles.giftName, { color: palette.ink }]}>{message.name}</Text> sent a{" "}
+        {gift.name}
+      </Text>
+    </View>
   );
 }
 
@@ -252,34 +285,38 @@ export function ChatSheet({
               style={styles.list}
               contentContainerStyle={styles.listBody}
               keyboardShouldPersistTaps="handled"
-              renderItem={({ item }) => (
-                <Pressable
-                  onLongPress={() => onLongPress(item)}
-                  delayLongPress={350}
-                  accessibilityHint={
-                    !myId
-                      ? undefined
-                      : item.authorId === myId
-                        ? "Long-press to delete your message"
-                        : "Long-press to remove, block or report"
-                  }
-                  style={styles.row}
-                >
-                  <Avatar name={item.name} size="sm" imageUrl={item.avatarUrl} />
-                  <View style={styles.rowBody}>
-                    <View style={styles.nameLine}>
-                      <Text
-                        style={[styles.name, { color: palette.quiet }]}
-                        numberOfLines={1}
-                      >
-                        {item.authorId === myId ? `${item.name} (you)` : item.name}
-                      </Text>
-                      <RoleTag role={item.role} palette={palette} />
+              renderItem={({ item }) =>
+                item.gift ? (
+                  <GiftLine message={item} gift={item.gift} palette={palette} />
+                ) : (
+                  <Pressable
+                    onLongPress={() => onLongPress(item)}
+                    delayLongPress={350}
+                    accessibilityHint={
+                      !myId
+                        ? undefined
+                        : item.authorId === myId
+                          ? "Long-press to delete your message"
+                          : "Long-press to remove, block or report"
+                    }
+                    style={styles.row}
+                  >
+                    <Avatar name={item.name} size="sm" imageUrl={item.avatarUrl} />
+                    <View style={styles.rowBody}>
+                      <View style={styles.nameLine}>
+                        <Text
+                          style={[styles.name, { color: palette.quiet }]}
+                          numberOfLines={1}
+                        >
+                          {item.authorId === myId ? `${item.name} (you)` : item.name}
+                        </Text>
+                        <RoleTag role={item.role} palette={palette} />
+                      </View>
+                      <Text style={[styles.text, { color: palette.ink }]}>{item.text}</Text>
                     </View>
-                    <Text style={[styles.text, { color: palette.ink }]}>{item.text}</Text>
-                  </View>
-                </Pressable>
-              )}
+                  </Pressable>
+                )
+              }
             />
           )}
 
@@ -449,6 +486,12 @@ const styles = StyleSheet.create({
     borderRadius: 3,
   },
   text: { fontFamily: fontFamilies.sansRegular, fontSize: 15, lineHeight: 21, marginTop: 1 },
+  giftRow: { flexDirection: "row", alignItems: "center", gap: spacing.sm },
+  /* Same width as a small avatar, so gift lines align with messages. */
+  giftArtBox: { width: 34, alignItems: "center" },
+  giftArt: { fontSize: 18, lineHeight: 22 },
+  giftText: { flex: 1, fontFamily: fontFamilies.sansRegular, fontSize: 13, lineHeight: 18 },
+  giftName: { fontFamily: fontFamilies.sansMedium },
 
   error: { paddingHorizontal: spacing.gutter, paddingBottom: spacing.xs },
   composer: {

@@ -12,6 +12,8 @@ import {
 import { ChautariError, requestJoin, type GetToken, type RoomRole } from "@/lib/api/chautari";
 import { CHAT_TOPIC, decodeChatPacket, type ChatPacket } from "./chat";
 import { EFFECT_TOPIC, decodeEffectPacket, type EffectPacket } from "./effects";
+import { GIFT_TOPIC, decodeGiftPacket, type GiftPacket } from "./gifts";
+import { joinContextHeaders } from "./joinContext";
 
 /**
  * Being in a live room.
@@ -123,6 +125,8 @@ export interface ChautariRoomState {
   onChatPacket: (listener: (packet: ChatPacket) => void) => () => void;
   /** Sound effects the server pushes into the room (applause). */
   onEffectPacket: (listener: (packet: EffectPacket) => void) => () => void;
+  /** Gifts to the host, as the server announces them. */
+  onGiftPacket: (listener: (packet: GiftPacket) => void) => () => void;
 }
 
 /**
@@ -356,6 +360,7 @@ export function useChautariRoom(
   /* Whoever is showing the chat. A Set, so the panel and a preview can both listen. */
   const chatListeners = useRef(new Set<(packet: ChatPacket) => void>());
   const effectListeners = useRef(new Set<(packet: EffectPacket) => void>());
+  const giftListeners = useRef(new Set<(packet: GiftPacket) => void>());
 
   /**
    * Rebuild the member list, reusing objects for anyone who did not change.
@@ -429,10 +434,11 @@ export function useChautariRoom(
          * broadcast would fail exactly when someone's train went into a
          * tunnel.
          */
-        const grant = await requestJoin(getTokenRef.current, {
-          roomSlug: slug,
-          displayName: displayNameRef.current,
-        });
+        const grant = await requestJoin(
+          getTokenRef.current,
+          { roomSlug: slug, displayName: displayNameRef.current },
+          await joinContextHeaders(),
+        );
         if (mine !== generation.current) return;
 
         setRole(grant.role);
@@ -455,7 +461,7 @@ export function useChautariRoom(
 
         room
           .on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
-            // Only the server sends data into a room: chat and sound effects.
+            // Only the server sends data into a room: chat, sound effects, gifts.
             if (mine !== generation.current) return;
             if (topic === CHAT_TOPIC) {
               const packet = decodeChatPacket(payload);
@@ -463,6 +469,9 @@ export function useChautariRoom(
             } else if (topic === EFFECT_TOPIC) {
               const packet = decodeEffectPacket(payload);
               if (packet) effectListeners.current.forEach((listener) => listener(packet));
+            } else if (topic === GIFT_TOPIC) {
+              const packet = decodeGiftPacket(payload);
+              if (packet) giftListeners.current.forEach((listener) => listener(packet));
             }
           })
           .on(RoomEvent.ParticipantConnected, () => syncMembers(room))
@@ -627,6 +636,14 @@ export function useChautariRoom(
     };
   }, []);
 
+  const onGiftPacket = useCallback((listener: (packet: GiftPacket) => void) => {
+    const listeners = giftListeners.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
   const setBlocked = useCallback((identities: ReadonlySet<string>) => {
     blockedRef.current = identities;
     if (roomRef.current) applyBlocks(roomRef.current, identities);
@@ -658,6 +675,7 @@ export function useChautariRoom(
     setBlocked,
     onChatPacket,
     onEffectPacket,
+    onGiftPacket,
   };
 }
 

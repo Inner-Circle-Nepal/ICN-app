@@ -43,6 +43,7 @@ import { PushNudgeProvider } from "@/features/pushNudge/context";
 import { PushNudgeSheet } from "@/features/pushNudge/PushNudgeSheet";
 import { ProfileCompletionGate } from "@/features/profile/ProfileCompletionGate";
 import { PushAccountLink } from "@/features/profile/PushAccountLink";
+import { BillingIdentity } from "@/features/wallet/BillingIdentity";
 import {
   extractNotificationPath,
   syncPushRegistration,
@@ -272,6 +273,7 @@ function AppShell() {
       */}
       {isClerkConfigured ? <ProfileCompletionGate /> : null}
       {isClerkConfigured ? <PushAccountLink /> : null}
+      {isClerkConfigured ? <BillingIdentity /> : null}
     </SafeAreaView>
   );
 }
