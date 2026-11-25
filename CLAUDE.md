@@ -27,7 +27,7 @@ npx expo install <pkg>     # never npm/yarn add
 
 `tests/liveApi.test.ts` hits the real Supabase project and fails without network or `.env` (it also asserts live data counts that drift). Use `test:offline` unless you mean to test the backend.
 
-Builds go through EAS (`npx eas-cli@latest build --profile development|production --platform android|ios`). The development build loads JS from Metro, so JS-only changes need only a Metro reload; adding a package with native code, or changing native config in `app.json` (plugins, icons), needs a new build. `eas.json` uses `appVersionSource: remote` + `autoIncrement`: only bump `expo.version` in `app.json` by hand.
+Builds go through EAS (`npx eas-cli@latest build --profile development|production --platform android|ios`). A release is built from its `release/x.y.z` branch after `npm ci` there (`node_modules` follows the last install, not the checked-out branch), then tagged `vx.y.z`; `main` carries features that are switched off and may add native modules a release doesn't need. The development build loads JS from Metro, so JS-only changes need only a Metro reload; adding a package with native code, or changing native config in `app.json` (plugins, icons), needs a new build. `eas.json` uses `appVersionSource: remote` + `autoIncrement`: only bump `expo.version` in `app.json` by hand.
 
 Android can be built on this laptop (JDK 17 and `~/Android/Sdk` are installed); iOS builds only on the cloud.
 - Dev build: `npx expo prebuild --clean --platform android` (only after native config changes; `android/` is gitignored and our native code lives in `modules/` and `plugins/`), then `npx expo run:android`. It is signed with a local debug key, so uninstall an EAS-signed dev build first.
@@ -108,7 +108,7 @@ Vault note 22 explains the whole path.
 
 ### Native-module seams
 
-Some native modules are missing in Expo Go or on web, and importing them at module scope crashes the whole app. They are reached through guarded seams: `src/lib/notifications/module.ts` (expo-notifications), `src/lib/audio/module.ts` (expo-audio, the Chautari clap sound), `src/lib/billing/module.ts` (react-native-purchases), `src/lib/keepAwake/module.ts` (expo-keep-awake: the screen stays on while a connected room screen is in front), and `src/lib/livekit/platform.ts` vs `platform.native.ts` (Metro picks per platform). Keep new uses behind these.
+Some native modules are missing in Expo Go or on web, and importing them at module scope crashes the whole app. They are reached through guarded seams: `src/lib/notifications/module.ts` (expo-notifications), `src/lib/audio/module.ts` (expo-audio, the Chautari clap sound), `src/lib/billing/module.ts` (react-native-purchases), `src/lib/keepAwake/module.ts` (expo-keep-awake: the screen stays on while a connected room screen is in front; development builds keep the screen on everywhere through Expo's own `withDevTools`, so test this on a store build), and `src/lib/livekit/platform.ts` vs `platform.native.ts` (Metro picks per platform). Keep new uses behind these.
 
 ### Push notifications
 
