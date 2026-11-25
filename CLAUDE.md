@@ -106,7 +106,7 @@ Vault note 22 explains the whole path.
 
 ### Native-module seams
 
-Some native modules are missing in Expo Go or on web, and importing them at module scope crashes the whole app. They are reached through guarded seams: `src/lib/notifications/module.ts` (expo-notifications), `src/lib/audio/module.ts` (expo-audio, the Chautari clap sound), and `src/lib/livekit/platform.ts` vs `platform.native.ts` (Metro picks per platform). Keep new uses behind these.
+Some native modules are missing in Expo Go or on web, and importing them at module scope crashes the whole app. They are reached through guarded seams: `src/lib/notifications/module.ts` (expo-notifications), `src/lib/audio/module.ts` (expo-audio, the Chautari clap sound), `src/lib/keepAwake/module.ts` (expo-keep-awake: the screen stays on while a connected room screen is in front), and `src/lib/livekit/platform.ts` vs `platform.native.ts` (Metro picks per platform). Keep new uses behind these.
 
 ### Push notifications
 

@@ -10,7 +10,8 @@ import {
   Text,
   View,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { allowScreenSleep, keepScreenOn } from "@/lib/keepAwake/module";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import Svg, { Path } from "react-native-svg";
@@ -98,6 +99,8 @@ interface ListenerRow {
 }
 
 const LISTENER_COLUMNS = 4;
+/** Our hold on the screen (keep-awake locks are per tag). */
+const KEEP_AWAKE_TAG = "chautari-room";
 
 /** What the screen shows before the shared room exists: a join about to start. */
 const noop = () => {};
@@ -474,6 +477,19 @@ function ChautariRoomScreenActive() {
   };
   const chatRole = isHost ? "host" : isModerator ? "moderator" : room.canPublish ? "speaker" : "listener";
   const canChat = Boolean(isSignedIn) && room.phase === "connected";
+
+  // Keep the screen on while the reader is looking at a connected room: a
+  // host who is talking shouldn't have the phone dim and lock under them.
+  // Only while this screen is in front; the mini bar, other screens and the
+  // background behave as usual.
+  const connected = room.phase === "connected";
+  useFocusEffect(
+    useCallback(() => {
+      if (!connected) return undefined;
+      keepScreenOn(KEEP_AWAKE_TAG);
+      return () => allowScreenSleep(KEEP_AWAKE_TAG);
+    }, [connected]),
+  );
 
   /* Applause: the host or a moderator asks the server; every app plays it. */
   const effectLine = useRoomEffects(room);
