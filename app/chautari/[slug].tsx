@@ -48,6 +48,13 @@ import { RoomControls } from "@/components/chautari/RoomControls";
 import { InviteSheet } from "@/components/chautari/InviteSheet";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
+import { GiftSheet } from "@/components/chautari/GiftSheet";
+import { GiftBurst } from "@/components/chautari/GiftBurst";
+import { SupportersSheet } from "@/components/chautari/SupportersSheet";
+import { SupportersStrip } from "@/components/chautari/SupportersStrip";
+import { useRoomSupporters } from "@/features/chautari/useRoomSupporters";
+import { useRoomGifts } from "@/features/chautari/useRoomGifts";
+import { useWallet } from "@/features/wallet/useWallet";
 import { ChatSheet, ChatStrip } from "@/components/chautari/RoomChat";
 import { useRoomChat } from "@/features/chautari/useRoomChat";
 import { useRoomEffects } from "@/features/chautari/useRoomEffects";
@@ -122,6 +129,7 @@ const IDLE_ROOM: ChautariRoomState = {
   setBlocked: noop,
   onChatPacket: () => noop,
   onEffectPacket: () => noop,
+  onGiftPacket: () => noop,
 };
 
 function isRoomNotFound(e: unknown): boolean {
@@ -490,6 +498,14 @@ function ChautariRoomScreenActive() {
     }
   };
 
+  /* Gifts: anyone but the host, once the server has gifts switched on. */
+  const wallet = useWallet();
+  const shownGift = useRoomGifts(room);
+  const supporters = useRoomSupporters(slug, room, wallet.data?.giftsEnabled === true);
+  const [supportersOpen, setSupportersOpen] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const canGift = Boolean(isSignedIn) && !isHost && wallet.data?.giftsEnabled === true;
+
   // Invite people: the host or a moderator, booked or live. Nobody running
   // the room is offered, nor the reader themselves.
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -804,6 +820,11 @@ function ChautariRoomScreenActive() {
               </View>
             ) : null}
 
+            <SupportersStrip
+              supporters={supporters.data?.supporters ?? []}
+              onPress={() => setSupportersOpen(true)}
+            />
+
             {room.micError ? (
               <ErrorMessage
                 message={room.micError}
@@ -895,6 +916,22 @@ function ChautariRoomScreenActive() {
         onDecline={(m) => confirmAct(m, "deny_speaker")}
       />
 
+      <SupportersSheet
+        visible={supportersOpen}
+        onClose={() => setSupportersOpen(false)}
+        data={supporters.data}
+        isLoading={supporters.isLoading}
+        isError={supporters.isError}
+        onRetry={() => void supporters.refetch()}
+      />
+
+      <GiftSheet
+        visible={giftOpen && canGift}
+        onClose={() => setGiftOpen(false)}
+        roomSlug={slug}
+        hostName={roomDetails?.host.name ?? null}
+      />
+
       <ChatSheet
         visible={chatOpen}
         onClose={closeChat}
@@ -917,6 +954,8 @@ function ChautariRoomScreenActive() {
         </View>
       ) : null}
 
+      {shownGift ? <GiftBurst key={shownGift.key} gift={shownGift} /> : null}
+
       {room.phase === "connected" ? <ChatStrip chat={chat} onOpen={openChat} /> : null}
 
       <RoomControls
@@ -934,6 +973,7 @@ function ChautariRoomScreenActive() {
         onToggleHand={() => void toggleHand()}
         onClap={() => void clap()}
         clapBusy={clapBusy}
+        onGift={canGift ? () => setGiftOpen(true) : undefined}
         connected={room.phase === "connected"}
         insetsBottom={insets.bottom}
       />

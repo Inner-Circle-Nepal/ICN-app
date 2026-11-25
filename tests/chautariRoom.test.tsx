@@ -160,6 +160,11 @@ vi.mock("livekit-client", () => ({
   ConnectionState: { Disconnected: "disconnected", Connected: "connected" },
 }));
 
+/* Reaches react-native and SecureStore; the room only forwards its headers. */
+vi.mock("@/features/chautari/joinContext", () => ({
+  joinContextHeaders: async () => ({ "x-icn-platform": "android" }),
+}));
+
 /* The one network call. `ChautariError` stays real — the hook branches on it. */
 vi.mock("@/lib/api/chautari", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/api/chautari")>();

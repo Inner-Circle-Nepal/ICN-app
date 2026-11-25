@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { AccessibilityInfo, Animated, Easing, StyleSheet, View } from "react-native";
+import React, { useEffect, useMemo } from "react";
+import { Animated, Easing, StyleSheet, View } from "react-native";
 import Svg, { Circle, Path } from "react-native-svg";
+
+import { useReduceMotion } from "@/hooks/useReduceMotion";
 
 /**
  * The Chautari tab icon: a voice in the middle, two rings of sound around it.
@@ -94,22 +96,6 @@ export function ChautariTabIcon({
       </Animated.View>
     </View>
   );
-}
-
-function useReduceMotion(): boolean {
-  const [reduce, setReduce] = useState(false);
-  useEffect(() => {
-    let mounted = true;
-    void AccessibilityInfo.isReduceMotionEnabled().then((v) => {
-      if (mounted) setReduce(v);
-    });
-    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduce);
-    return () => {
-      mounted = false;
-      sub.remove();
-    };
-  }, []);
-  return reduce;
 }
 
 const styles = StyleSheet.create({

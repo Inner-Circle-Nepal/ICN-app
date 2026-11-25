@@ -20,6 +20,11 @@
 #   npm run bots -- chat <slug>                      the last 20 messages, deleted ones marked
 #   npm run bots -- reports                          the latest reports (from readers and the word filter)
 #
+#   Coins and gifts (test coins only; the room must be live and you must be in it to see gifts):
+#   npm run bots -- coins <username> [n]             give a reader n test coins (default 500)
+#   npm run bots -- gift <slug> <bot> [gift]         a bot sends the host a gift (phool, chiya, diyo; default phool)
+#   npm run bots -- wallet <username>                a reader's coins and points
+#
 # <bot> is a username without or with the prefix: `sita` or `bot_sita`.
 #
 # Chat and applause do what the site's routes do: store the row, then push the
@@ -35,7 +40,7 @@ set -euo pipefail
 
 db() { docker exec -i supabase_db_ICN-app psql -U postgres -q -v ON_ERROR_STOP=1 "$@"; }
 
-usage() { grep -E '^#   (npm run bots|Live chat)' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { grep -E '^#   (npm run bots|Live chat|Coins and gifts)' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
 here=$(cd "$(dirname "$0")" && pwd)
 SITE_ENV=${SITE_ENV:-$here/../../../../site/site/.env.development.local}
@@ -78,6 +83,14 @@ select r.livekit_room || E'\t' || json_build_object('type', 'message', 'message'
   'avatarUrl', ins.avatar_url, 'role', ins.role, 'text', ins.body, 'sentAt', ins.created_at))::text
 from ins, r;
 SQL
+}
+
+# Any reader's Clerk id from their username (with or without @).
+reader_id() {
+  local id
+  id=$(db -tA -v u="${1#@}" <<<"select clerk_user_id from public.reader_profiles where username = :'u';")
+  [ -n "$id" ] || { echo "No reader called @${1#@}." >&2; exit 1; }
+  echo "$id"
 }
 
 bot_id() {
@@ -229,6 +242,21 @@ select to_char(created_at at time zone 'Asia/Kathmandu', 'Mon DD HH24:MI') as np
 from public.reader_reports order by created_at desc limit 10;
 SQL
     ;;
+  coins)
+    [ $# -ge 1 ] || usage
+    who=$(reader_id "$1")
+    # Through the ledger like any grant: an `adjustment` transaction, test coins.
+    db -tA -v who="$who" -v n="${2:-500}" <<'SQL'
+select public.adjust_coins(:'who', :'n'::int, true, 'bots.sh', 'bots:' || gen_random_uuid())->>'balance' || ' coins now';
+SQL
+    ;;
+  wallet)
+    [ $# -eq 1 ] || usage
+    who=$(reader_id "$1")
+    db -v who="$who" <<'SQL'
+select coins, test_coins, points, test_points from public.coin_wallets where clerk_user_id = :'who';
+SQL
+    ;;
   join)
     [ $# -ge 1 ] || usage
     slug=$1; shift
@@ -252,5 +280,34 @@ where p.clerk_user_id = any(string_to_array(:'ids', ','))
 SQL
       node "$here/livekit-bots/join.mjs" "$lk" "$SITE_ENV" 2>&1 |
       grep --line-buffered -v -e '^{"level"' -e 'Decoder is supported' ;;
+  gift)
+    [ $# -ge 2 ] || usage
+    bot=$(bot_id "$2")
+    gift=${3:-phool}
+    # Bots never run dry: top up with test coins first if they're low.
+    db -tA -v bot="$bot" >/dev/null <<'SQL'
+select public.adjust_coins(:'bot', 1000, true, 'bots.sh top-up', 'bots:' || gen_random_uuid())
+where coalesce((select test_coins from public.coin_wallets where clerk_user_id = :'bot'), 0) < 100;
+SQL
+    # The ledger part of the site's gift route (send_gift), then its packet.
+    out=$(db -tA -F $'\t' -v slug="$1" -v bot="$bot" -v gift="$gift" <<'SQL'
+with r as (
+  select id, host_clerk_id, livekit_room from public.chautari_rooms where slug = :'slug' and status = 'live'
+), g as (
+  select r.livekit_room, public.send_gift(gen_random_uuid(), r.id, :'bot', r.host_clerk_id, :'gift') as res from r
+)
+select g.res->>'status', g.livekit_room, json_build_object(
+  'type', 'gift', 'id', g.res->>'giftRowId', 'authorId', :'bot', 'avatarUrl', p.avatar_url,
+  'sentAt', now(), 'giftId', :'gift', 'name', c.name, 'nameNe', c.name_ne,
+  'by', coalesce(p.display_name, 'A listener'))::text
+from g
+left join public.gift_catalog c on c.id = :'gift'
+left join public.reader_profiles p on p.clerk_user_id = :'bot';
+SQL
+)
+    IFS=$'\t' read -r status room packet <<<"$out"
+    [ -n "$status" ] || { echo "No live room called $1." >&2; exit 1; }
+    [ "$status" = sent ] || { echo "Not sent: $status" >&2; exit 1; }
+    push "$room"$'\t'"$packet" chautari.gift && echo "sent $gift" ;;
   *) usage ;;
 esac

@@ -110,7 +110,10 @@ async function call<T>(
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  let headers: Record<string, string> = { "content-type": "application/json" };
+  let headers: Record<string, string> = {
+    "content-type": "application/json",
+    ...(init.headers as Record<string, string> | undefined),
+  };
   if (getToken) {
     const token = await getToken();
     if (!token) {
@@ -273,10 +276,12 @@ export async function endRoom(getToken: GetToken, slug: string): Promise<void> {
 export async function requestJoin(
   getToken: GetToken,
   args: { roomSlug: string; displayName?: string | null },
+  /** Device context for the listening log (features/chautari/joinContext.ts). */
+  contextHeaders: Record<string, string> = {},
 ): Promise<JoinGrant> {
   return call<JoinGrant>(
     "/api/chautari/token",
-    { method: "POST", body: JSON.stringify(args) },
+    { method: "POST", body: JSON.stringify(args), headers: contextHeaders },
     getToken,
   );
 }
@@ -375,4 +380,61 @@ export async function playRoomEffect(getToken: GetToken, slug: string, effect: "
     { method: "POST", body: JSON.stringify({ roomSlug: slug, effect }) },
     getToken,
   );
+}
+
+/* ------------------------------------------------------------------ gifts */
+
+export interface GiftSent {
+  giftId: string;
+  coins: number;
+  /** The sender's coins after the gift. */
+  balance: number;
+  /** True when this `requestId` had already been sent: nothing moved twice. */
+  replay: boolean;
+  /** Whether the room was told; the gift stands either way. */
+  delivered: boolean;
+}
+
+/**
+ * Send the host a gift. `requestId` is a fresh UUID per tap and is reused
+ * when retrying that same tap, so a retry never spends twice. Refusals arrive
+ * as `ChautariError` reasons: `insufficient_coins` (402), `gifts_disabled`,
+ * `not_in_room`, `cannot_gift_self`, `room_ended`, `gift_unavailable`.
+ */
+export async function sendGift(
+  getToken: GetToken,
+  args: { roomSlug: string; giftId: string; requestId: string },
+): Promise<GiftSent> {
+  return call<GiftSent>(
+    "/api/chautari/gift",
+    { method: "POST", body: JSON.stringify(args) },
+    getToken,
+  );
+}
+
+export interface GiftPerson {
+  name: string;
+  username: string | null;
+  avatarUrl: string | null;
+}
+
+export interface RoomSupporters {
+  /** Everyone who gifted, names only, in the order they first gave. */
+  supporters: GiftPerson[];
+  /** Only for the room's host: amounts, to thank people by name. */
+  host: {
+    totalCoins: number;
+    timeline: (GiftPerson & { id: string; giftId: string; giftName: string; coins: number; sentAt: string })[];
+    totals: (GiftPerson & { coins: number })[];
+  } | null;
+}
+
+/** A room's supporters; the host's copy also carries the amounts. */
+export async function getRoomSupporters(getToken: GetToken, slug: string): Promise<RoomSupporters> {
+  const res = await call<RoomSupporters & { ok: true }>(
+    `/api/chautari/rooms/${encodeURIComponent(slug)}/gifts`,
+    { method: "GET" },
+    getToken,
+  );
+  return { supporters: res.supporters, host: res.host };
 }
