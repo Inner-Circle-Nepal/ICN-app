@@ -464,3 +464,22 @@ export async function playRoomEffect(getToken: GetToken, slug: string, effect: "
     getToken,
   );
 }
+
+/**
+ * React with an emoji (a quick run of taps grouped as `count`). Answers how
+ * many the server accepted; over the allowance it refuses with `slow_down`,
+ * which callers ignore.
+ */
+export async function sendReaction(
+  getToken: GetToken,
+  slug: string,
+  reaction: string,
+  count: number,
+): Promise<number> {
+  const res = await call<{ accepted: number }>(
+    "/api/chautari/react",
+    { method: "POST", body: JSON.stringify({ roomSlug: slug, reaction, count }) },
+    getToken,
+  );
+  return res.accepted ?? count;
+}

@@ -13,6 +13,7 @@ import { ChautariError, requestJoin, type GetToken, type RoomRole } from "@/lib/
 import { CHAT_TOPIC, decodeChatPacket, type ChatPacket } from "./chat";
 import { EFFECT_TOPIC, decodeEffectPacket, type EffectPacket } from "./effects";
 import { ROOM_TOPIC, decodeRoomEvent, type RoomEventPacket } from "./roomEvents";
+import { REACTION_TOPIC, decodeReactionsPacket, type ReactionItem } from "./reactions";
 
 /**
  * Being in a live room.
@@ -126,6 +127,8 @@ export interface ChautariRoomState {
   onEffectPacket: (listener: (packet: EffectPacket) => void) => () => void;
   /** Room events: the lock changed, someone is asking to join (roomEvents.ts). */
   onRoomEvent: (listener: (packet: RoomEventPacket) => void) => () => void;
+  /** Batches of emoji reactions (reactions.ts). */
+  onReactions: (listener: (items: ReactionItem[]) => void) => () => void;
 }
 
 /**
@@ -360,6 +363,7 @@ export function useChautariRoom(
   const chatListeners = useRef(new Set<(packet: ChatPacket) => void>());
   const effectListeners = useRef(new Set<(packet: EffectPacket) => void>());
   const roomEventListeners = useRef(new Set<(packet: RoomEventPacket) => void>());
+  const reactionListeners = useRef(new Set<(items: ReactionItem[]) => void>());
 
   /**
    * Rebuild the member list, reusing objects for anyone who did not change.
@@ -470,6 +474,9 @@ export function useChautariRoom(
             } else if (topic === ROOM_TOPIC) {
               const packet = decodeRoomEvent(payload);
               if (packet) roomEventListeners.current.forEach((listener) => listener(packet));
+            } else if (topic === REACTION_TOPIC) {
+              const items = decodeReactionsPacket(payload);
+              if (items.length) reactionListeners.current.forEach((listener) => listener(items));
             }
           })
           .on(RoomEvent.ParticipantConnected, () => syncMembers(room))
@@ -642,6 +649,14 @@ export function useChautariRoom(
     };
   }, []);
 
+  const onReactions = useCallback((listener: (items: ReactionItem[]) => void) => {
+    const listeners = reactionListeners.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
   const setBlocked = useCallback((identities: ReadonlySet<string>) => {
     blockedRef.current = identities;
     if (roomRef.current) applyBlocks(roomRef.current, identities);
@@ -674,6 +689,7 @@ export function useChautariRoom(
     onChatPacket,
     onEffectPacket,
     onRoomEvent,
+    onReactions,
   };
 }
 

@@ -23,6 +23,7 @@
 #   npm run bots -- chatter <slug> [count] [secs]    the bots take turns (default 6, 2 s apart)
 #   npm run bots -- unsay <slug> [bot]               delete the latest message (that bot's, or anyone's)
 #   npm run bots -- clap <slug> [bot]                applause, credited to the bot (default: the host)
+#   npm run bots -- react <slug> [rounds]            the bots send bursts of emoji reactions (default 8, about 0.4 s apart)
 #   npm run bots -- chat <slug>                      the last 20 messages, deleted ones marked
 #   npm run bots -- reports                          the latest reports (from readers and the word filter)
 #
@@ -235,6 +236,24 @@ select to_char(created_at at time zone 'Asia/Kathmandu', 'Mon DD HH24:MI') as np
 from public.reader_reports order by created_at desc limit 10;
 SQL
     ;;
+  react)
+    [ $# -ge 1 ] || usage
+    rounds=${2:-8}
+    lk=$(db -tA -v slug="$1" <<<"select livekit_room from public.chautari_rooms where slug = :'slug' and status = 'live';")
+    [ -n "$lk" ] || { echo "No live room called $1." >&2; exit 1; }
+    mapfile -t bots < <(db -tA <<<"select clerk_user_id from public.reader_profiles where clerk_user_id like 'user_bot_%';")
+    kinds=(clap heart laugh fire pray wow)
+    # Like the site's batches: a few bots, each with a reaction and a count.
+    for ((r = 0; r < rounds; r++)); do
+      items=""
+      for b in "${bots[@]}"; do
+        (( RANDOM % 3 == 0 )) && continue
+        items+="${items:+,}{\"reaction\":\"${kinds[RANDOM % ${#kinds[@]}]}\",\"count\":$(( RANDOM % 4 + 1 )),\"by\":\"$b\"}"
+      done
+      [ -n "$items" ] && push "$lk"$'\t'"{\"type\":\"reactions\",\"items\":[$items]}" chautari.reaction
+      sleep 0.4
+    done
+    echo "sent $rounds rounds of reactions" ;;
   join)
     [ $# -ge 1 ] || usage
     slug=$1; shift

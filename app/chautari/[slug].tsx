@@ -21,7 +21,6 @@ import {
   endRoom,
   getRoomDetails,
   moderate,
-  playRoomEffect,
   setHandRaised,
   startRoom,
   updateRoomSettings,
@@ -59,6 +58,8 @@ import { HandsSheet } from "@/components/chautari/HandsSheet";
 import { ChatSheet, ChatStrip } from "@/components/chautari/RoomChat";
 import { useRoomChat } from "@/features/chautari/useRoomChat";
 import { useRoomEffects } from "@/features/chautari/useRoomEffects";
+import { useRoomReactions } from "@/features/chautari/useRoomReactions";
+import { ReactionLayer } from "@/components/chautari/ReactionLayer";
 import { useMyProfile } from "@/features/profile/useMyProfile";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -133,6 +134,7 @@ const IDLE_ROOM: ChautariRoomState = {
   onChatPacket: () => noop,
   onEffectPacket: () => noop,
   onRoomEvent: () => noop,
+  onReactions: () => noop,
 };
 
 function isRoomNotFound(e: unknown): boolean {
@@ -499,20 +501,13 @@ function ChautariRoomScreenActive() {
     }, [connected]),
   );
 
-  /* Applause: the host or a moderator asks the server; every app plays it. */
+  /*
+   * Applause from hosts on older app versions still plays here (this app no
+   * longer sends it: 👏 is one of the reactions now).
+   */
   const effectLine = useRoomEffects(room);
-  const [clapBusy, setClapBusy] = useState(false);
-  const clap = async () => {
-    if (clapBusy) return;
-    setClapBusy(true);
-    try {
-      await playRoomEffect(getToken, slug, "clap");
-    } catch (e) {
-      setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
-    } finally {
-      setClapBusy(false);
-    }
-  };
+  // Emoji reactions: anyone in the room; they float up from the bottom right.
+  const reactions = useRoomReactions(slug, room);
 
   // Invite people: the host or a moderator, booked or live. Nobody running
   // the room is offered, nor the reader themselves.
@@ -1031,6 +1026,8 @@ function ChautariRoomScreenActive() {
 
       {room.phase === "connected" ? <ChatStrip chat={chat} onOpen={openChat} /> : null}
 
+      <ReactionLayer floaters={reactions.floaters} bottom={insets.bottom + 140} />
+
       <RoomControls
         isHost={isHost}
         canModerate={canModerate}
@@ -1044,8 +1041,7 @@ function ChautariRoomScreenActive() {
         handRaised={handRaised}
         handBusy={handBusy}
         onToggleHand={() => void toggleHand()}
-        onClap={() => void clap()}
-        clapBusy={clapBusy}
+        onReact={isSignedIn ? reactions.react : undefined}
         connected={room.phase === "connected"}
         insetsBottom={insets.bottom}
       />
