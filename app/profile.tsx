@@ -28,6 +28,7 @@ import {
 } from "@/features/profile/validators";
 import { releasePushToken } from "@/features/profile/PushAccountLink";
 import { CoinWallet } from "@/components/chautari/CoinWallet";
+import { useGiftsEnabled } from "@/features/wallet/useWallet";
 import { Avatar } from "@/components/chautari/Avatar";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -96,6 +97,7 @@ function ProfileScreenActive() {
   const insets = useSafeAreaInsets();
   const { isSignedIn, isLoaded, signOut, getToken } = useAuth();
   const { user } = useUser();
+  const giftsEnabled = useGiftsEnabled();
   const {
     profile,
     isLoading: profileLoading,
@@ -631,26 +633,32 @@ function ProfileScreenActive() {
             )}
           </Pressable>
 
-          {/* ------------------------------------------------ chautari */}
-          <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
-            Chautari
-          </Text>
-          <Text style={[styles.sectionHint, { color: palette.quiet }]}>
-            Coins are for sending gifts in rooms. Points come from the gifts listeners send you.
-          </Text>
-          <CoinWallet />
-          <Pressable
-            onPress={() => router.push("/chautari/earn")}
-            accessibilityRole="button"
-            accessibilityLabel="Your earnings"
-            style={({ pressed }) => [
-              styles.secondary,
-              { borderColor: palette.ink },
-              pressed && styles.pressed,
-            ]}
-          >
-            <Text style={[styles.secondaryText, { color: palette.ink }]}>Your earnings</Text>
-          </Pressable>
+          {/* ------------------------------------------ chautari coins */}
+          {giftsEnabled ? (
+            <>
+              <Text
+                style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}
+              >
+                Chautari
+              </Text>
+              <Text style={[styles.sectionHint, { color: palette.quiet }]}>
+                Coins are for sending gifts in rooms. Points come from the gifts listeners send you.
+              </Text>
+              <CoinWallet />
+              <Pressable
+                onPress={() => router.push("/chautari/earn")}
+                accessibilityRole="button"
+                accessibilityLabel="Your earnings"
+                style={({ pressed }) => [
+                  styles.secondary,
+                  { borderColor: palette.ink },
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Text style={[styles.secondaryText, { color: palette.ink }]}>Your earnings</Text>
+              </Pressable>
+            </>
+          ) : null}
 
           {/* ------------------------------------------------- account */}
           <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>

@@ -10,9 +10,10 @@ const key = (slug: string) => ["roomSupporters", slug] as const;
 /**
  * A room's supporters (who sent gifts), refreshed whenever a gift arrives in
  * the room. The host's copy includes amounts; everyone else's is names only.
+ * Not fetched while gifts are switched off.
  * Must be used inside a ClerkProvider.
  */
-export function useRoomSupporters(slug: string, room: ChautariRoomState) {
+export function useRoomSupporters(slug: string, room: ChautariRoomState, giftsEnabled: boolean) {
   const { isSignedIn, getToken } = useAuth();
   const qc = useQueryClient();
   const { onGiftPacket } = room;
@@ -25,7 +26,7 @@ export function useRoomSupporters(slug: string, room: ChautariRoomState) {
   return useQuery({
     queryKey: key(slug),
     queryFn: () => getRoomSupporters(getToken, slug),
-    enabled: Boolean(isSignedIn) && room.phase === "connected",
+    enabled: giftsEnabled && Boolean(isSignedIn) && room.phase === "connected",
     staleTime: 60 * 1000,
   });
 }

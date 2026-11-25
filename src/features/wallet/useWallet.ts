@@ -41,6 +41,15 @@ export function useEarnings() {
   });
 }
 
+/**
+ * Whether coins and gifts are switched on (the site's CHAUTARI_GIFTS). False
+ * while loading, signed out, or if the wallet can't be read, so nothing about
+ * coins (shop, balance, earnings, supporters) shows until the server says so.
+ */
+export function useGiftsEnabled(): boolean {
+  return useWallet().data?.giftsEnabled === true;
+}
+
 /** Put a balance the server just returned into the cached wallet. */
 function useSetBalance() {
   const { userId } = useAuth();

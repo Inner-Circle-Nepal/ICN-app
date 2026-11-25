@@ -501,7 +501,7 @@ function ChautariRoomScreenActive() {
   /* Gifts: anyone but the host, once the server has gifts switched on. */
   const wallet = useWallet();
   const shownGift = useRoomGifts(room);
-  const supporters = useRoomSupporters(slug, room);
+  const supporters = useRoomSupporters(slug, room, wallet.data?.giftsEnabled === true);
   const [supportersOpen, setSupportersOpen] = useState(false);
   const [giftOpen, setGiftOpen] = useState(false);
   const canGift = Boolean(isSignedIn) && !isHost && wallet.data?.giftsEnabled === true;

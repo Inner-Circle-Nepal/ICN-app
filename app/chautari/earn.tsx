@@ -6,6 +6,7 @@ import { useUser } from "@clerk/clerk-expo";
 import Svg, { Path } from "react-native-svg";
 
 import { EarningsSection } from "@/components/chautari/EarningsSection";
+import { useGiftsEnabled } from "@/features/wallet/useWallet";
 import { isClerkConfigured } from "@/constants/config";
 import {
   buildRequirements,
@@ -45,7 +46,11 @@ function EarnScreenWithClerk() {
   const verified = isLoaded && user
     ? isAccountVerified({ emails: user.emailAddresses, phones: user.phoneNumbers })
     : false;
-  return <EarnScreenBody verified={verified} earnings={user ? <EarningsSection /> : null} />;
+  // Earnings only once coins and gifts are switched on.
+  const giftsEnabled = useGiftsEnabled();
+  return (
+    <EarnScreenBody verified={verified} earnings={user && giftsEnabled ? <EarningsSection /> : null} />
+  );
 }
 
 function EarnScreenBody({
