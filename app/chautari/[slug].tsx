@@ -24,7 +24,10 @@ import {
   playRoomEffect,
   setHandRaised,
   startRoom,
+  updateRoomSettings,
   type ModerationAction,
+  type RoomDetails,
+  type RoomSettings,
 } from "@/lib/api/chautari";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
@@ -47,6 +50,10 @@ import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { ListenerTile, SpeakerTile } from "@/components/chautari/RoomTiles";
 import { RoomControls } from "@/components/chautari/RoomControls";
 import { InviteSheet } from "@/components/chautari/InviteSheet";
+import { AskToJoin } from "@/components/chautari/AskToJoin";
+import { JoinRequestsSheet, JoinRequestsStrip } from "@/components/chautari/JoinRequests";
+import { LockIcon } from "@/components/chautari/RoomIcons";
+import { useJoinRequests } from "@/features/chautari/useJoinRequests";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
 import { ChatSheet, ChatStrip } from "@/components/chautari/RoomChat";
@@ -125,6 +132,7 @@ const IDLE_ROOM: ChautariRoomState = {
   setBlocked: noop,
   onChatPacket: () => noop,
   onEffectPacket: () => noop,
+  onRoomEvent: () => noop,
 };
 
 function isRoomNotFound(e: unknown): boolean {
@@ -520,6 +528,62 @@ function ChautariRoomScreenActive() {
   );
 
   /*
+   * Invite only. The lock is the host's and moderators' (in a booked room,
+   * whoever may start it); members may invite their own followers when the
+   * room allows it. A change by anyone reaches every app as a room event.
+   */
+  const inviteOnly = roomDetails?.inviteOnly === true;
+  const membersCanInvite = roomDetails?.membersCanInvite === true;
+  const canChangeSettings = canModerate || details.data?.canStart === true;
+  const canInvite = canModerate || (membersCanInvite && room.phase === "connected");
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const saveSettings = useCallback(
+    async (changes: Partial<RoomSettings>) => {
+      setSettingsBusy(true);
+      try {
+        const saved = await updateRoomSettings(getToken, slug, changes);
+        queryClient.setQueriesData<{ room: RoomDetails; canStart: boolean }>(
+          { queryKey: ["chautari-room", slug] },
+          (d) => (d ? { ...d, room: { ...d.room, ...saved } } : d),
+        );
+        if (changes.inviteOnly !== undefined) {
+          toast.show({
+            icon: "check",
+            message: saved.inviteOnly
+              ? "Invite only: people now ask to join, and you let them in."
+              : "Anyone can join this room now.",
+          });
+        }
+      } catch (e) {
+        toast.show({
+          icon: "info",
+          message: e instanceof ChautariError ? e.message : "Couldn't change that. Try again.",
+        });
+      } finally {
+        setSettingsBusy(false);
+      }
+    },
+    [getToken, slug, queryClient, toast],
+  );
+  const { onRoomEvent } = room;
+  useEffect(
+    () =>
+      onRoomEvent((event) => {
+        if (event.type === "settings") void queryClient.invalidateQueries({ queryKey: ["chautari-room", slug] });
+      }),
+    [onRoomEvent, queryClient, slug],
+  );
+  const lock = canChangeSettings
+    ? {
+        locked: inviteOnly,
+        busy: settingsBusy,
+        onToggle: () => void saveSettings({ inviteOnly: !inviteOnly }),
+      }
+    : { locked: inviteOnly, busy: false };
+  const joinRequests = useJoinRequests(slug, room, canModerate);
+  const [requestsOpen, setRequestsOpen] = useState(false);
+
+  /*
    * A moderator has two ways out: slip away, or end the room for everyone
    * (they hold the host's controls). The host's own button always ends it.
    */
@@ -617,7 +681,7 @@ function ChautariRoomScreenActive() {
       ]);
 
     return (
-      <Shell onBack={goBack} onShare={share} title={roomDetails.title}>
+      <Shell onBack={goBack} onShare={share} title={roomDetails.title} lock={lock}>
         <WaitingRoom
           room={roomDetails}
           canStart={Boolean(details.data?.canStart)}
@@ -694,6 +758,15 @@ function ChautariRoomScreenActive() {
     return <Shell onBack={back} onShare={null} title={title} />;
   }
 
+  if (room.phase === "error" && room.errorReason === "invite_only") {
+    // Invite only: ask, wait here, and join the moment the host says yes.
+    return (
+      <Shell onBack={back} onShare={null} title={title} lock={{ locked: true, busy: false }}>
+        <AskToJoin slug={slug} onAdmitted={room.retry} />
+      </Shell>
+    );
+  }
+
   if (room.phase === "error") {
     // The server said no (full, removed, ended…): its message, and a way on
     // that fits. Anything else was the network: retry.
@@ -751,7 +824,7 @@ function ChautariRoomScreenActive() {
   const onAir = room.phase === "connected" && room.identity ? ticker : null;
 
   return (
-    <Shell onBack={back} onShare={share} title={title}>
+    <Shell onBack={back} onShare={share} title={title} lock={lock}>
       <LiveChyron
         phase={room.phase}
         onAir={onAir}
@@ -781,7 +854,7 @@ function ChautariRoomScreenActive() {
             ) : null}
             <View style={styles.headlineRow}>
               <Text style={[styles.headline, { color: palette.ink }]}>{title}</Text>
-              {canModerate ? (
+              {canInvite ? (
                 <Pressable
                   onPress={() => setInviteOpen(true)}
                   accessibilityRole="button"
@@ -818,6 +891,13 @@ function ChautariRoomScreenActive() {
                   </View>
                 ) : null}
               </View>
+            ) : null}
+
+            {canModerate ? (
+              <JoinRequestsStrip
+                requests={joinRequests.list.data ?? []}
+                onPress={() => setRequestsOpen(true)}
+              />
             ) : null}
 
             {room.micError ? (
@@ -897,10 +977,26 @@ function ChautariRoomScreenActive() {
       />
 
       <InviteSheet
-        visible={inviteOpen && canModerate}
+        visible={inviteOpen && canInvite}
         onClose={() => setInviteOpen(false)}
         slug={slug}
         exclude={inviteExclude}
+        membersCanInvite={
+          canModerate
+            ? {
+                value: membersCanInvite,
+                busy: settingsBusy,
+                onChange: (value) => void saveSettings({ membersCanInvite: value }),
+              }
+            : undefined
+        }
+      />
+
+      <JoinRequestsSheet
+        visible={requestsOpen && canModerate}
+        onClose={() => setRequestsOpen(false)}
+        requests={joinRequests.list.data ?? []}
+        onDecide={(requestId, approve) => joinRequests.decide.mutateAsync({ requestId, approve })}
       />
 
       <HandsSheet
@@ -970,11 +1066,18 @@ function Shell({
   onBack,
   onShare,
   title,
+  lock = null,
 }: {
   children?: React.ReactNode;
   onBack: () => void;
   onShare: null | (() => void);
   title: string;
+  /**
+   * The room's lock. With `onToggle` (host, moderators) it is a button that
+   * shows the current state; without, it only appears when the room is
+   * invite only, so readers know why some can't get in.
+   */
+  lock?: { locked: boolean; busy: boolean; onToggle?: () => void } | null;
 }) {
   const { palette } = useTheme();
   return (
@@ -1005,6 +1108,26 @@ function Shell({
         >
           {title}
         </Text>
+        {lock?.onToggle ? (
+          <Pressable
+            onPress={lock.onToggle}
+            disabled={lock.busy}
+            hitSlop={8}
+            accessibilityRole="switch"
+            accessibilityLabel="Invite only"
+            accessibilityHint={
+              lock.locked ? "Lets anyone join again" : "Only invited people, or people you let in, can join"
+            }
+            accessibilityState={{ checked: lock.locked, disabled: lock.busy }}
+            style={({ pressed }) => [styles.lockBtn, (pressed || lock.busy) && styles.lockBtnPressed]}
+          >
+            <LockIcon color={palette.ink} size={18} locked={lock.locked} />
+          </Pressable>
+        ) : lock?.locked ? (
+          <View style={styles.lockBtn} accessible accessibilityLabel="This room is invite only">
+            <LockIcon color={palette.quiet} size={18} locked />
+          </View>
+        ) : null}
         {onShare ? (
           <Pressable
             onPress={onShare}
@@ -1153,6 +1276,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   topBtnSpacer: { width: 60 },
+  lockBtn: { width: 36, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  lockBtnPressed: { opacity: 0.5 },
   topBtnText: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 11,

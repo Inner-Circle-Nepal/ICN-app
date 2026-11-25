@@ -12,6 +12,7 @@ import {
 import { ChautariError, requestJoin, type GetToken, type RoomRole } from "@/lib/api/chautari";
 import { CHAT_TOPIC, decodeChatPacket, type ChatPacket } from "./chat";
 import { EFFECT_TOPIC, decodeEffectPacket, type EffectPacket } from "./effects";
+import { ROOM_TOPIC, decodeRoomEvent, type RoomEventPacket } from "./roomEvents";
 
 /**
  * Being in a live room.
@@ -123,6 +124,8 @@ export interface ChautariRoomState {
   onChatPacket: (listener: (packet: ChatPacket) => void) => () => void;
   /** Sound effects the server pushes into the room (applause). */
   onEffectPacket: (listener: (packet: EffectPacket) => void) => () => void;
+  /** Room events: the lock changed, someone is asking to join (roomEvents.ts). */
+  onRoomEvent: (listener: (packet: RoomEventPacket) => void) => () => void;
 }
 
 /**
@@ -356,6 +359,7 @@ export function useChautariRoom(
   /* Whoever is showing the chat. A Set, so the panel and a preview can both listen. */
   const chatListeners = useRef(new Set<(packet: ChatPacket) => void>());
   const effectListeners = useRef(new Set<(packet: EffectPacket) => void>());
+  const roomEventListeners = useRef(new Set<(packet: RoomEventPacket) => void>());
 
   /**
    * Rebuild the member list, reusing objects for anyone who did not change.
@@ -463,6 +467,9 @@ export function useChautariRoom(
             } else if (topic === EFFECT_TOPIC) {
               const packet = decodeEffectPacket(payload);
               if (packet) effectListeners.current.forEach((listener) => listener(packet));
+            } else if (topic === ROOM_TOPIC) {
+              const packet = decodeRoomEvent(payload);
+              if (packet) roomEventListeners.current.forEach((listener) => listener(packet));
             }
           })
           .on(RoomEvent.ParticipantConnected, () => syncMembers(room))
@@ -627,6 +634,14 @@ export function useChautariRoom(
     };
   }, []);
 
+  const onRoomEvent = useCallback((listener: (packet: RoomEventPacket) => void) => {
+    const listeners = roomEventListeners.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
+
   const setBlocked = useCallback((identities: ReadonlySet<string>) => {
     blockedRef.current = identities;
     if (roomRef.current) applyBlocks(roomRef.current, identities);
@@ -658,6 +673,7 @@ export function useChautariRoom(
     setBlocked,
     onChatPacket,
     onEffectPacket,
+    onRoomEvent,
   };
 }
 

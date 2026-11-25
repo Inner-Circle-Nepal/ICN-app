@@ -56,3 +56,27 @@ export function HandIcon({ size = 20, color }: { size?: number; color: string })
     </Svg>
   );
 }
+
+/** A padlock: shut for an invite-only room, open (shackle lifted) for a public one. */
+export function LockIcon({
+  size = 20,
+  color,
+  locked,
+}: {
+  size?: number;
+  color: string;
+  locked: boolean;
+}) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Rect x={5} y={10.5} width={14} height={10} rx={2} stroke={color} strokeWidth={1.7} />
+      <Path
+        d={locked ? "M8 10.5V7.5a4 4 0 0 1 8 0v3" : "M8 10.5V7.5a4 4 0 0 1 7.6-1.7"}
+        stroke={color}
+        strokeWidth={1.7}
+        strokeLinecap="round"
+      />
+      <Path d="M12 14.5v2.5" stroke={color} strokeWidth={1.7} strokeLinecap="round" />
+    </Svg>
+  );
+}

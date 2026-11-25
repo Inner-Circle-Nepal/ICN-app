@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Switch, Text, View } from "react-native";
 import { useAuth } from "@clerk/clerk-expo";
 
 import { BottomSheet } from "./BottomSheet";
@@ -26,12 +26,18 @@ export function InviteSheet({
   onClose,
   slug,
   exclude,
+  membersCanInvite,
 }: {
   visible: boolean;
   onClose: () => void;
   slug: string;
   /** Handles not to offer: you, the host, the moderators. */
   exclude: string[];
+  /**
+   * For the host and moderators: the "Let members invite" switch. Omitted
+   * for everyone else, who only invite.
+   */
+  membersCanInvite?: { value: boolean; busy: boolean; onChange: (value: boolean) => void };
 }) {
   const { palette } = useTheme();
   const { getToken } = useAuth();
@@ -73,6 +79,25 @@ export function InviteSheet({
         People who follow you with Chautari alerts on get a notification. Others won&apos;t be
         notified.
       </Text>
+
+      {membersCanInvite ? (
+        <View style={[styles.toggleRow, { borderColor: palette.rule }]}>
+          <View style={styles.toggleText}>
+            <Text style={[styles.toggleLabel, { color: palette.ink }]}>Let members invite</Text>
+            <Text style={[styles.toggleHint, { color: palette.quiet }]}>
+              Anyone in the room can invite their own followers.
+            </Text>
+          </View>
+          <Switch
+            value={membersCanInvite.value}
+            disabled={membersCanInvite.busy}
+            onValueChange={membersCanInvite.onChange}
+            trackColor={{ false: palette.rule2, true: palette.ink }}
+            thumbColor={palette.paper}
+            accessibilityLabel="Let members invite their followers"
+          />
+        </View>
+      ) : null}
 
       {result ? (
         <View style={styles.result}>
@@ -155,6 +180,18 @@ export function InviteSheet({
 }
 
 const styles = StyleSheet.create({
+  toggleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginTop: 14,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+  },
+  toggleText: { flex: 1 },
+  toggleLabel: { fontFamily: fontFamilies.serifMedium, fontSize: 15.5 },
+  toggleHint: { fontFamily: fontFamilies.sansRegular, fontSize: 12, marginTop: 2 },
   kicker: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 11,

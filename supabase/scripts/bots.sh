@@ -12,6 +12,12 @@
 #   npm run bots -- staff                            local newsroom login staff@local.test / staff1234 (superadmin)
 #   npm run bots -- join <slug> [bot…]               bots sit in a live room as listeners until Ctrl-C (default: all)
 #
+#   Invite-only rooms (the room must be live; join from the phone first to see the request arrive):
+#   npm run bots -- lock <slug> [off]                make a room invite only (or public again)
+#   npm run bots -- members <slug> [off]             let everyone in the room invite their followers (or not)
+#   npm run bots -- ask <slug> <bot>                 a bot asks to join (your room: you get the toast and the request)
+#   npm run bots -- letin <slug> <username>          approve a reader's request (a bot's room: as if its host let you in)
+#
 #   Live chat and applause (the room must be live and you must be in it):
 #   npm run bots -- say <slug> <bot> [text]          a bot writes in the chat
 #   npm run bots -- chatter <slug> [count] [secs]    the bots take turns (default 6, 2 s apart)
@@ -35,7 +41,7 @@ set -euo pipefail
 
 db() { docker exec -i supabase_db_ICN-app psql -U postgres -q -v ON_ERROR_STOP=1 "$@"; }
 
-usage() { grep -E '^#   (npm run bots|Live chat)' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
+usage() { grep -E '^#   (npm run bots|Live chat|Invite-only)' "$0" | sed 's/^# \{0,1\}//'; exit 1; }
 
 here=$(cd "$(dirname "$0")" && pwd)
 SITE_ENV=${SITE_ENV:-$here/../../../../site/site/.env.development.local}
@@ -252,5 +258,65 @@ where p.clerk_user_id = any(string_to_array(:'ids', ','))
 SQL
       node "$here/livekit-bots/join.mjs" "$lk" "$SITE_ENV" 2>&1 |
       grep --line-buffered -v -e '^{"level"' -e 'Decoder is supported' ;;
+  lock)
+    [ $# -ge 1 ] || usage
+    on=true; [ "${2:-}" = off ] && on=false
+    line=$(db -tA -F $'\t' -v slug="$1" -v on="$on" <<'SQL'
+update public.chautari_rooms set invite_only = :'on'::boolean, updated_at = now()
+where slug = :'slug' and status <> 'ended'
+returning livekit_room, json_build_object('type', 'settings', 'inviteOnly', invite_only, 'membersCanInvite', members_can_invite)::text;
+SQL
+)
+    [ -n "$line" ] || { echo "No open room called $1." >&2; exit 1; }
+    # Tell the apps in the room, if LiveKit has it (someone has joined).
+    push "$line" chautari.room >/dev/null 2>&1 || true
+    [ "$on" = true ] && echo "$1 is invite only" || echo "$1 is public" ;;
+  members)
+    [ $# -ge 1 ] || usage
+    on=true; [ "${2:-}" = off ] && on=false
+    line=$(db -tA -F $'\t' -v slug="$1" -v on="$on" <<'SQL'
+update public.chautari_rooms set members_can_invite = :'on'::boolean, updated_at = now()
+where slug = :'slug' and status <> 'ended'
+returning livekit_room, json_build_object('type', 'settings', 'inviteOnly', invite_only, 'membersCanInvite', members_can_invite)::text;
+SQL
+)
+    [ -n "$line" ] || { echo "No open room called $1." >&2; exit 1; }
+    push "$line" chautari.room >/dev/null 2>&1 || true
+    [ "$on" = true ] && echo "members of $1 can invite" || echo "only the host and moderators of $1 can invite" ;;
+  ask)
+    [ $# -ge 2 ] || usage
+    bot=$(bot_id "$2")
+    # What the site's join-request route does: a pending request, then a
+    # join_request event (here to everyone in the room, not only the host).
+    line=$(db -tA -F $'\t' -v slug="$1" -v bot="$bot" <<'SQL'
+with r as (
+  select id, livekit_room from public.chautari_rooms where slug = :'slug' and status = 'live'
+), q as (
+  insert into public.chautari_join_requests (room_id, clerk_user_id, status, created_at, decided_at, decided_by)
+  select r.id, :'bot', 'pending', now(), null, null from r
+  on conflict (room_id, clerk_user_id) do update
+    set status = 'pending', created_at = now(), decided_at = null, decided_by = null
+  returning id
+)
+select r.livekit_room, json_build_object(
+  'type', 'join_request', 'requestId', q.id, 'name', coalesce(p.display_name, p.username),
+  'username', p.username, 'avatarUrl', p.avatar_url)::text
+from r, q left join public.reader_profiles p on p.clerk_user_id = :'bot';
+SQL
+)
+    [ -n "$line" ] || { echo "No live room called $1." >&2; exit 1; }
+    if push "$line" chautari.room >/dev/null 2>&1; then echo "$2 asked to join $1"
+    else echo "$2 asked to join $1 (saved; nobody is in the room yet, so no toast)"; fi ;;
+  letin)
+    [ $# -eq 2 ] || usage
+    out=$(db -tA -v slug="$1" -v u="${2#@}" <<'SQL'
+update public.chautari_join_requests q set status = 'approved', decided_at = now(), decided_by = 'bots.sh'
+from public.chautari_rooms r, public.reader_profiles p
+where r.slug = :'slug' and q.room_id = r.id and p.username = :'u' and q.clerk_user_id = p.clerk_user_id
+  and q.status = 'pending'
+returning q.id;
+SQL
+)
+    [ -n "$out" ] && echo "let $2 into $1" || { echo "No pending request from $2 in $1." >&2; exit 1; } ;;
   *) usage ;;
 esac

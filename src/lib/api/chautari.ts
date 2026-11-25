@@ -31,6 +31,8 @@ export interface DiscoverRoom {
   bannerUrl?: string | null;
   hostUsername?: string | null;
   hostAvatarUrl?: string | null;
+  /** Listed, but joining means an invite or asking (older servers: absent). */
+  inviteOnly?: boolean;
 }
 
 /** A person shown on a room's details: its host or a moderator. */
@@ -49,6 +51,10 @@ export interface RoomDetails {
   scheduledFor: string | null;
   startedAt: string | null;
   bannerUrl: string | null;
+  /** Joining needs an invite, or the host letting you in. */
+  inviteOnly?: boolean;
+  /** Anyone in the room may invite their own followers. */
+  membersCanInvite?: boolean;
   host: RoomPerson;
   moderators: RoomPerson[];
 }
@@ -61,6 +67,7 @@ export interface MyRoom {
   scheduledFor: string | null;
   startedAt: string | null;
   bannerUrl: string | null;
+  inviteOnly?: boolean;
   role: "host" | "moderator";
 }
 
@@ -176,6 +183,8 @@ export async function openRoom(
     bannerUrl?: string | null;
     /** Up to three @handles to make moderators from the start. */
     moderators?: string[];
+    /** Only invited people, or people the host lets in, can join. */
+    inviteOnly?: boolean;
   },
 ): Promise<{ slug: string; title: string; status: RoomStatus }> {
   const res = await call<{ room: { slug: string; title: string; status: RoomStatus } }>(
@@ -248,6 +257,85 @@ export async function inviteToRoom(
     alreadyInvited: res.alreadyInvited ?? [],
     notReachable: res.notReachable ?? [],
   };
+}
+
+/* ------------------------------------------------- invite-only rooms */
+
+export interface RoomSettings {
+  inviteOnly: boolean;
+  membersCanInvite: boolean;
+}
+
+/** Host or moderator: lock or unlock the room, or let members invite. */
+export async function updateRoomSettings(
+  getToken: GetToken,
+  slug: string,
+  changes: Partial<RoomSettings>,
+): Promise<RoomSettings> {
+  const res = await call<RoomSettings>(
+    "/api/chautari/rooms/settings",
+    { method: "POST", body: JSON.stringify({ slug, ...changes }) },
+    getToken,
+  );
+  return { inviteOnly: res.inviteOnly, membersCanInvite: res.membersCanInvite };
+}
+
+/**
+ * Where someone stands with an invite-only room. "admitted": they can join
+ * now (invited, let in, or the room was unlocked).
+ */
+export type JoinRequestState = "none" | "pending" | "approved" | "declined" | "admitted";
+
+/** Ask the host to be let in. Refusals: `asked_recently`, `room_ended`, … */
+export async function askToJoin(getToken: GetToken, slug: string): Promise<JoinRequestState> {
+  const res = await call<{ status: JoinRequestState }>(
+    "/api/chautari/join-request",
+    { method: "POST", body: JSON.stringify({ slug }) },
+    getToken,
+  );
+  return res.status;
+}
+
+export async function getJoinRequestState(getToken: GetToken, slug: string): Promise<JoinRequestState> {
+  const res = await call<{ status: JoinRequestState }>(
+    `/api/chautari/join-request?slug=${encodeURIComponent(slug)}`,
+    { method: "GET" },
+    getToken,
+  );
+  return res.status;
+}
+
+/** Someone asking to join, as the host and moderators see them. */
+export interface JoinRequest {
+  requestId: string;
+  name: string;
+  username: string | null;
+  avatarUrl: string | null;
+  askedAt: string;
+}
+
+export async function getJoinRequests(getToken: GetToken, slug: string): Promise<JoinRequest[]> {
+  const res = await call<{ requests: JoinRequest[] }>(
+    `/api/chautari/rooms/${encodeURIComponent(slug)}/requests`,
+    { method: "GET" },
+    getToken,
+  );
+  return res.requests ?? [];
+}
+
+/** Let someone in, or not. Returns who is still waiting. */
+export async function decideJoinRequest(
+  getToken: GetToken,
+  slug: string,
+  requestId: string,
+  approve: boolean,
+): Promise<JoinRequest[]> {
+  const res = await call<{ requests: JoinRequest[] }>(
+    `/api/chautari/rooms/${encodeURIComponent(slug)}/requests`,
+    { method: "POST", body: JSON.stringify({ requestId, approve }) },
+    getToken,
+  );
+  return res.requests ?? [];
 }
 
 /** Rooms the reader hosts or moderates, live or booked. */
