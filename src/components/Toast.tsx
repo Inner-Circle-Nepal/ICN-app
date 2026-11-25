@@ -11,12 +11,14 @@ import { Animated, Easing, Pressable, StyleSheet, Text, View } from "react-nativ
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Svg, { Circle, Path } from "react-native-svg";
 
+import { useReduceMotion } from "@/hooks/useReduceMotion";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
 
 /**
- * Toasts: a short confirmation that slides in at the top, keeps its full
- * sentence (the context matters), and leaves by itself. Tap to dismiss early.
+ * Toasts: a short confirmation that drops in at the top as a dark pill (the
+ * same family as the room's gift card), keeps its full sentence (the context
+ * matters), and leaves by itself. Tap to dismiss early.
  *
  *   const toast = useToast();
  *   toast.show({ icon: "check", message: "Your profile has been updated." });
@@ -124,22 +126,35 @@ function visibleMs(message: string): number {
   return Math.min(7000, Math.max(3000, 1800 + message.length * 45));
 }
 
+/**
+ * The card: a dark pill in the style of the room's gift card. It slides down
+ * with a small overshoot and the icon pops in a beat later; it leaves by
+ * fading up. With "reduce motion" on it only fades.
+ */
 function ToastCard({ toast, onGone }: { toast: ShownToast; onGone: () => void }) {
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
+  const reduceMotion = useReduceMotion();
+  // 0 = hidden above, 1 = shown, 2 = leaving.
   const [shown] = useState(() => new Animated.Value(0));
+  const [pop] = useState(() => new Animated.Value(0));
 
   useEffect(() => {
-    Animated.timing(shown, {
-      toValue: 1,
-      duration: 260,
-      easing: Easing.out(Easing.cubic),
-      useNativeDriver: true,
-    }).start();
+    const enter = reduceMotion
+      ? Animated.timing(shown, { toValue: 1, duration: 200, useNativeDriver: true })
+      : Animated.spring(shown, { toValue: 1, friction: 7, tension: 90, useNativeDriver: true });
+    const iconIn = reduceMotion
+      ? Animated.timing(pop, { toValue: 1, duration: 0, useNativeDriver: true })
+      : Animated.sequence([
+          Animated.delay(110),
+          Animated.spring(pop, { toValue: 1, friction: 4, tension: 160, useNativeDriver: true }),
+        ]);
+    Animated.parallel([enter, iconIn]).start();
+
     const t = setTimeout(() => {
       Animated.timing(shown, {
-        toValue: 0,
-        duration: 220,
+        toValue: 2,
+        duration: 240,
         easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
       }).start(({ finished }) => finished && onGone());
@@ -153,8 +168,10 @@ function ToastCard({ toast, onGone }: { toast: ShownToast; onGone: () => void })
     <View pointerEvents="box-none" style={[styles.layer, { top: insets.top + 8 }]}>
       <Animated.View
         style={{
-          opacity: shown,
-          transform: [{ translateY: shown.interpolate({ inputRange: [0, 1], outputRange: [-24, 0] }) }],
+          opacity: shown.interpolate({ inputRange: [0, 1, 2], outputRange: [0, 1, 0] }),
+          transform: reduceMotion
+            ? []
+            : [{ translateY: shown.interpolate({ inputRange: [0, 1, 2], outputRange: [-28, 0, -12] }) }],
         }}
       >
         <Pressable
@@ -162,12 +179,18 @@ function ToastCard({ toast, onGone }: { toast: ShownToast; onGone: () => void })
           accessibilityRole="alert"
           accessibilityLabel={toast.message}
           accessibilityHint="Tap to dismiss"
-          style={[styles.card, { backgroundColor: palette.paper, borderColor: palette.ink }]}
+          style={[styles.card, { backgroundColor: palette.ink }]}
         >
-          <View style={[styles.iconCircle, { backgroundColor: palette.ink }]}>
-            <ToastGlyph icon={toast.icon} color={palette.paper} />
-          </View>
-          <Text style={[styles.message, { color: palette.ink }]}>{toast.message}</Text>
+          <Animated.View
+            style={[
+              styles.iconCircle,
+              { backgroundColor: palette.paper },
+              { transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.3, 1] }) }] },
+            ]}
+          >
+            <ToastGlyph icon={toast.icon} color={palette.ink} />
+          </Animated.View>
+          <Text style={[styles.message, { color: palette.paper }]}>{toast.message}</Text>
         </Pressable>
       </Animated.View>
     </View>
@@ -198,20 +221,29 @@ function ToastGlyph({ icon, color }: { icon: ToastIcon; color: string }) {
 }
 
 const styles = StyleSheet.create({
-  layer: { position: "absolute", left: spacing.gutter, right: spacing.gutter, zIndex: 1000, elevation: 20 },
+  layer: {
+    position: "absolute",
+    left: spacing.gutter,
+    right: spacing.gutter,
+    alignItems: "center",
+    zIndex: 1000,
+    elevation: 20,
+  },
   card: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 12,
-    borderWidth: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    gap: 10,
+    maxWidth: "100%",
+    borderRadius: 26,
+    paddingVertical: 8,
+    paddingLeft: 8,
+    paddingRight: 18,
     shadowColor: "#000",
     shadowOpacity: 0.12,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
-  iconCircle: { width: 28, height: 28, borderRadius: 14, alignItems: "center", justifyContent: "center" },
-  message: { flex: 1, fontFamily: fontFamilies.sansRegular, fontSize: 14, lineHeight: 20 },
+  iconCircle: { width: 30, height: 30, borderRadius: 15, alignItems: "center", justifyContent: "center" },
+  message: { flexShrink: 1, fontFamily: fontFamilies.sansMedium, fontSize: 14, lineHeight: 20 },
 });

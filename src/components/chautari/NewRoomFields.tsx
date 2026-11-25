@@ -161,6 +161,54 @@ function Chip({
 
 /* ----------------------------------------------------------------- Banner */
 
+/**
+ * Who can join: anyone, or only people who are invited or let in. An
+ * invite-only room is still listed (with a lock); others ask to join.
+ */
+export function WhoCanJoinField({
+  inviteOnly,
+  onChange,
+  disabled,
+}: {
+  inviteOnly: boolean;
+  onChange: (inviteOnly: boolean) => void;
+  disabled: boolean;
+}) {
+  const { palette } = useTheme();
+  return (
+    <View style={styles.segment}>
+      {(
+        [
+          { value: false, label: "Anyone" },
+          { value: true, label: "Invite only" },
+        ] as const
+      ).map((opt) => {
+        const active = inviteOnly === opt.value;
+        return (
+          <Pressable
+            key={opt.label}
+            disabled={disabled}
+            onPress={() => onChange(opt.value)}
+            accessibilityRole="radio"
+            accessibilityState={{ checked: active }}
+            style={[
+              styles.segmentBtn,
+              {
+                borderColor: active ? palette.ink : palette.rule2,
+                backgroundColor: active ? palette.ink : "transparent",
+              },
+            ]}
+          >
+            <Text style={[styles.segmentText, { color: active ? palette.paper : palette.ink }]}>
+              {opt.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 export function BannerField({
   url,
   onChange,

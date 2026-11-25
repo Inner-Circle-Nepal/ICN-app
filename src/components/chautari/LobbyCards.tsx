@@ -7,6 +7,7 @@ import { bookingStamp, formatStartsIn } from "@/features/chautari/schedule";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
 import { Avatar } from "./Avatar";
+import { LockIcon } from "./RoomIcons";
 
 /**
  * The Chautari lobby's two kinds of card: rooms on air now, and rooms on
@@ -31,6 +32,7 @@ export function LiveRoomCard({ room, onPress }: { room: DiscoverRoom; onPress: (
         room.hostName ? `Hosted by ${room.hostName}` : null,
         `${room.listeners} listening, ${room.speakers} on stage`,
         room.isFull ? "Room is full" : null,
+        room.inviteOnly ? "Invite only: ask to join, or come in if you're invited" : null,
       ]
         .filter(Boolean)
         .join(". ")}
@@ -75,9 +77,16 @@ export function LiveRoomCard({ room, onPress }: { room: DiscoverRoom; onPress: (
               {listening} in the room · {room.speakers} on stage
             </Text>
           </View>
-          <Text style={[styles.join, { color: room.isFull ? palette.quiet : palette.red }]}>
-            {room.isFull ? "Full" : "Listen in →"}
-          </Text>
+          {room.inviteOnly && !room.isFull ? (
+            <View style={styles.lockedJoin}>
+              <LockIcon color={palette.red} size={13} locked />
+              <Text style={[styles.join, { color: palette.red }]}>Invite only →</Text>
+            </View>
+          ) : (
+            <Text style={[styles.join, { color: room.isFull ? palette.quiet : palette.red }]}>
+              {room.isFull ? "Full" : "Listen in →"}
+            </Text>
+          )}
         </View>
       </View>
     </Pressable>
@@ -204,6 +213,7 @@ function UpcomingCard({
 }
 
 const styles = StyleSheet.create({
+  lockedJoin: { flexDirection: "row", alignItems: "center", gap: 4 },
   pressed: { opacity: 0.85 },
   fill: { width: "100%", height: "100%" },
 

@@ -10,7 +10,8 @@ import {
   Text,
   View,
 } from "react-native";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
+import { allowScreenSleep, keepScreenOn } from "@/lib/keepAwake/module";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAuth, useUser } from "@clerk/clerk-expo";
 import Svg, { Path } from "react-native-svg";
@@ -20,10 +21,12 @@ import {
   endRoom,
   getRoomDetails,
   moderate,
-  playRoomEffect,
   setHandRaised,
   startRoom,
+  updateRoomSettings,
   type ModerationAction,
+  type RoomDetails,
+  type RoomSettings,
 } from "@/lib/api/chautari";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
@@ -46,6 +49,10 @@ import { fontFamilies, spacing, type ThemePalette } from "@/theme/tokens";
 import { ListenerTile, SpeakerTile } from "@/components/chautari/RoomTiles";
 import { RoomControls } from "@/components/chautari/RoomControls";
 import { InviteSheet } from "@/components/chautari/InviteSheet";
+import { AskToJoin } from "@/components/chautari/AskToJoin";
+import { JoinRequestsSheet, JoinRequestsStrip } from "@/components/chautari/JoinRequests";
+import { LockIcon } from "@/components/chautari/RoomIcons";
+import { useJoinRequests } from "@/features/chautari/useJoinRequests";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
 import { GiftSheet } from "@/components/chautari/GiftSheet";
@@ -58,6 +65,8 @@ import { useWallet } from "@/features/wallet/useWallet";
 import { ChatSheet, ChatStrip } from "@/components/chautari/RoomChat";
 import { useRoomChat } from "@/features/chautari/useRoomChat";
 import { useRoomEffects } from "@/features/chautari/useRoomEffects";
+import { useRoomReactions } from "@/features/chautari/useRoomReactions";
+import { ReactionLayer } from "@/components/chautari/ReactionLayer";
 import { useMyProfile } from "@/features/profile/useMyProfile";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
@@ -105,6 +114,8 @@ interface ListenerRow {
 }
 
 const LISTENER_COLUMNS = 4;
+/** Our hold on the screen (keep-awake locks are per tag). */
+const KEEP_AWAKE_TAG = "chautari-room";
 
 /** What the screen shows before the shared room exists: a join about to start. */
 const noop = () => {};
@@ -130,6 +141,8 @@ const IDLE_ROOM: ChautariRoomState = {
   onChatPacket: () => noop,
   onEffectPacket: () => noop,
   onGiftPacket: () => noop,
+  onRoomEvent: () => noop,
+  onReactions: () => noop,
 };
 
 function isRoomNotFound(e: unknown): boolean {
@@ -483,20 +496,26 @@ function ChautariRoomScreenActive() {
   const chatRole = isHost ? "host" : isModerator ? "moderator" : room.canPublish ? "speaker" : "listener";
   const canChat = Boolean(isSignedIn) && room.phase === "connected";
 
-  /* Applause: the host or a moderator asks the server; every app plays it. */
+  // Keep the screen on while the reader is looking at a connected room: a
+  // host who is talking shouldn't have the phone dim and lock under them.
+  // Only while this screen is in front; the mini bar, other screens and the
+  // background behave as usual.
+  const connected = room.phase === "connected";
+  useFocusEffect(
+    useCallback(() => {
+      if (!connected) return undefined;
+      keepScreenOn(KEEP_AWAKE_TAG);
+      return () => allowScreenSleep(KEEP_AWAKE_TAG);
+    }, [connected]),
+  );
+
+  /*
+   * Applause from hosts on older app versions still plays here (this app no
+   * longer sends it: 👏 is one of the reactions now).
+   */
   const effectLine = useRoomEffects(room);
-  const [clapBusy, setClapBusy] = useState(false);
-  const clap = async () => {
-    if (clapBusy) return;
-    setClapBusy(true);
-    try {
-      await playRoomEffect(getToken, slug, "clap");
-    } catch (e) {
-      setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
-    } finally {
-      setClapBusy(false);
-    }
-  };
+  // Emoji reactions: anyone in the room; they float up from the bottom right.
+  const reactions = useRoomReactions(slug, room);
 
   /* Gifts: anyone but the host, once the server has gifts switched on. */
   const wallet = useWallet();
@@ -518,6 +537,62 @@ function ChautariRoomScreenActive() {
       ].filter((u): u is string => Boolean(u)),
     [profile?.username, roomDetails],
   );
+
+  /*
+   * Invite only. The lock is the host's and moderators' (in a booked room,
+   * whoever may start it); members may invite their own followers when the
+   * room allows it. A change by anyone reaches every app as a room event.
+   */
+  const inviteOnly = roomDetails?.inviteOnly === true;
+  const membersCanInvite = roomDetails?.membersCanInvite === true;
+  const canChangeSettings = canModerate || details.data?.canStart === true;
+  const canInvite = canModerate || (membersCanInvite && room.phase === "connected");
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const saveSettings = useCallback(
+    async (changes: Partial<RoomSettings>) => {
+      setSettingsBusy(true);
+      try {
+        const saved = await updateRoomSettings(getToken, slug, changes);
+        queryClient.setQueriesData<{ room: RoomDetails; canStart: boolean }>(
+          { queryKey: ["chautari-room", slug] },
+          (d) => (d ? { ...d, room: { ...d.room, ...saved } } : d),
+        );
+        if (changes.inviteOnly !== undefined) {
+          toast.show({
+            icon: "check",
+            message: saved.inviteOnly
+              ? "Invite only: people now ask to join, and you let them in."
+              : "Anyone can join this room now.",
+          });
+        }
+      } catch (e) {
+        toast.show({
+          icon: "info",
+          message: e instanceof ChautariError ? e.message : "Couldn't change that. Try again.",
+        });
+      } finally {
+        setSettingsBusy(false);
+      }
+    },
+    [getToken, slug, queryClient, toast],
+  );
+  const { onRoomEvent } = room;
+  useEffect(
+    () =>
+      onRoomEvent((event) => {
+        if (event.type === "settings") void queryClient.invalidateQueries({ queryKey: ["chautari-room", slug] });
+      }),
+    [onRoomEvent, queryClient, slug],
+  );
+  const lock = canChangeSettings
+    ? {
+        locked: inviteOnly,
+        busy: settingsBusy,
+        onToggle: () => void saveSettings({ inviteOnly: !inviteOnly }),
+      }
+    : { locked: inviteOnly, busy: false };
+  const joinRequests = useJoinRequests(slug, room, canModerate);
+  const [requestsOpen, setRequestsOpen] = useState(false);
 
   /*
    * A moderator has two ways out: slip away, or end the room for everyone
@@ -617,7 +692,7 @@ function ChautariRoomScreenActive() {
       ]);
 
     return (
-      <Shell onBack={goBack} onShare={share} title={roomDetails.title}>
+      <Shell onBack={goBack} onShare={share} title={roomDetails.title} lock={lock}>
         <WaitingRoom
           room={roomDetails}
           canStart={Boolean(details.data?.canStart)}
@@ -694,6 +769,15 @@ function ChautariRoomScreenActive() {
     return <Shell onBack={back} onShare={null} title={title} />;
   }
 
+  if (room.phase === "error" && room.errorReason === "invite_only") {
+    // Invite only: ask, wait here, and join the moment the host says yes.
+    return (
+      <Shell onBack={back} onShare={null} title={title} lock={{ locked: true, busy: false }}>
+        <AskToJoin slug={slug} onAdmitted={room.retry} />
+      </Shell>
+    );
+  }
+
   if (room.phase === "error") {
     // The server said no (full, removed, ended…): its message, and a way on
     // that fits. Anything else was the network: retry.
@@ -751,7 +835,7 @@ function ChautariRoomScreenActive() {
   const onAir = room.phase === "connected" && room.identity ? ticker : null;
 
   return (
-    <Shell onBack={back} onShare={share} title={title}>
+    <Shell onBack={back} onShare={share} title={title} lock={lock}>
       <LiveChyron
         phase={room.phase}
         onAir={onAir}
@@ -781,7 +865,7 @@ function ChautariRoomScreenActive() {
             ) : null}
             <View style={styles.headlineRow}>
               <Text style={[styles.headline, { color: palette.ink }]}>{title}</Text>
-              {canModerate ? (
+              {canInvite ? (
                 <Pressable
                   onPress={() => setInviteOpen(true)}
                   accessibilityRole="button"
@@ -824,6 +908,13 @@ function ChautariRoomScreenActive() {
               supporters={supporters.data?.supporters ?? []}
               onPress={() => setSupportersOpen(true)}
             />
+
+            {canModerate ? (
+              <JoinRequestsStrip
+                requests={joinRequests.list.data ?? []}
+                onPress={() => setRequestsOpen(true)}
+              />
+            ) : null}
 
             {room.micError ? (
               <ErrorMessage
@@ -902,10 +993,26 @@ function ChautariRoomScreenActive() {
       />
 
       <InviteSheet
-        visible={inviteOpen && canModerate}
+        visible={inviteOpen && canInvite}
         onClose={() => setInviteOpen(false)}
         slug={slug}
         exclude={inviteExclude}
+        membersCanInvite={
+          canModerate
+            ? {
+                value: membersCanInvite,
+                busy: settingsBusy,
+                onChange: (value) => void saveSettings({ membersCanInvite: value }),
+              }
+            : undefined
+        }
+      />
+
+      <JoinRequestsSheet
+        visible={requestsOpen && canModerate}
+        onClose={() => setRequestsOpen(false)}
+        requests={joinRequests.list.data ?? []}
+        onDecide={(requestId, approve) => joinRequests.decide.mutateAsync({ requestId, approve })}
       />
 
       <HandsSheet
@@ -958,6 +1065,8 @@ function ChautariRoomScreenActive() {
 
       {room.phase === "connected" ? <ChatStrip chat={chat} onOpen={openChat} /> : null}
 
+      <ReactionLayer floaters={reactions.floaters} bottom={insets.bottom + 140} />
+
       <RoomControls
         isHost={isHost}
         canModerate={canModerate}
@@ -971,8 +1080,7 @@ function ChautariRoomScreenActive() {
         handRaised={handRaised}
         handBusy={handBusy}
         onToggleHand={() => void toggleHand()}
-        onClap={() => void clap()}
-        clapBusy={clapBusy}
+        onReact={isSignedIn ? reactions.react : undefined}
         onGift={canGift ? () => setGiftOpen(true) : undefined}
         connected={room.phase === "connected"}
         insetsBottom={insets.bottom}
@@ -994,11 +1102,18 @@ function Shell({
   onBack,
   onShare,
   title,
+  lock = null,
 }: {
   children?: React.ReactNode;
   onBack: () => void;
   onShare: null | (() => void);
   title: string;
+  /**
+   * The room's lock. With `onToggle` (host, moderators) it is a button that
+   * shows the current state; without, it only appears when the room is
+   * invite only, so readers know why some can't get in.
+   */
+  lock?: { locked: boolean; busy: boolean; onToggle?: () => void } | null;
 }) {
   const { palette } = useTheme();
   return (
@@ -1029,6 +1144,26 @@ function Shell({
         >
           {title}
         </Text>
+        {lock?.onToggle ? (
+          <Pressable
+            onPress={lock.onToggle}
+            disabled={lock.busy}
+            hitSlop={8}
+            accessibilityRole="switch"
+            accessibilityLabel="Invite only"
+            accessibilityHint={
+              lock.locked ? "Lets anyone join again" : "Only invited people, or people you let in, can join"
+            }
+            accessibilityState={{ checked: lock.locked, disabled: lock.busy }}
+            style={({ pressed }) => [styles.lockBtn, (pressed || lock.busy) && styles.lockBtnPressed]}
+          >
+            <LockIcon color={palette.ink} size={18} locked={lock.locked} />
+          </Pressable>
+        ) : lock?.locked ? (
+          <View style={styles.lockBtn} accessible accessibilityLabel="This room is invite only">
+            <LockIcon color={palette.quiet} size={18} locked />
+          </View>
+        ) : null}
         {onShare ? (
           <Pressable
             onPress={onShare}
@@ -1177,6 +1312,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   topBtnSpacer: { width: 60 },
+  lockBtn: { width: 36, minHeight: 44, alignItems: "center", justifyContent: "center" },
+  lockBtnPressed: { opacity: 0.5 },
   topBtnText: {
     fontFamily: fontFamilies.sansMedium,
     fontSize: 11,

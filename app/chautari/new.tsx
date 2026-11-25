@@ -17,6 +17,7 @@ import {
   MAX_MODERATORS,
   ModeratorsField,
   WhenField,
+  WhoCanJoinField,
   type PickedModerator,
   type When,
 } from "@/components/chautari/NewRoomFields";
@@ -104,6 +105,7 @@ function NewRoomScreenActive() {
   const [when, setWhen] = useState<When>({ mode: "now" });
   const [bannerUrl, setBannerUrl] = useState<string | null>(null);
   const [moderators, setModerators] = useState<PickedModerator[]>([]);
+  const [inviteOnly, setInviteOnly] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const scheduling = when.mode === "later";
@@ -151,6 +153,7 @@ function NewRoomScreenActive() {
         scheduledFor: when.mode === "later" ? when.iso : null,
         bannerUrl,
         moderators: moderators.map((m) => m.username),
+        inviteOnly,
       });
       // Replace, not push: backing out of the room should not land the host
       // on the form that created it. A booked room opens to its waiting room.
@@ -260,6 +263,16 @@ function NewRoomScreenActive() {
           When
         </Text>
         <WhenField value={when} onChange={setWhen} disabled={busy} />
+
+        <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
+          Who can join
+        </Text>
+        <Text style={[styles.sectionHint, { color: palette.quiet }]}>
+          {inviteOnly
+            ? "The room is still listed, with a lock. People you invite come straight in; anyone else asks, and you or a moderator let them in."
+            : "Anyone signed in can join. You can lock the room later from its top bar."}
+        </Text>
+        <WhoCanJoinField inviteOnly={inviteOnly} onChange={setInviteOnly} disabled={busy} />
 
         <Text style={[styles.sectionLabel, { color: palette.ink, borderBottomColor: palette.ink }]}>
           Moderators · optional
