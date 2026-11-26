@@ -51,8 +51,11 @@ A full copy of the backend runs on this laptop so pushes, rooms and follows can 
 ## Notes vault (Obsidian)
 
 `/home/setobagh/Desktop/ICN/ProjectInfo/ICN-app/` is the project's Obsidian vault, outside both repos and part of the working routine:
-- `Revision for Later/`: numbered conceptual notes (`NN-topic.md`), indexed in `00-README.md`. After a piece of work that taught something new, add or extend a note: generalised lessons and why, not a changelog of edits; a short command table at the end.
-- `Future changes/`: deferred work and open items. Check it before starting new work, and add anything the user postpones.
+- `Developer Education/`: numbered conceptual notes (`NN-topic.md`), indexed in `00-README.md`. After a piece of work that taught something new, add or extend a note: generalised lessons and why, not a changelog of edits; a short command table at the end.
+- `Deferred work/`: deferred work and open items, numbered by topic. Check it before starting new work, and add anything the user postpones.
+- `Where we left off/where-we-left-off.md`: only the context of the last session (state of repos, builds, stores, and what is next). Read it first in a new session; rewrite it at the end of one.
+- `Feature Requests.md`: feature requests from Sudip Dai and readers, noted by the user. Strike items through when shipped.
+- `Commands/`: command references (indexed in `00-README.md`).
 
 Never write secrets or personal email addresses there.
 
@@ -196,7 +199,7 @@ Tables (`site/supabase/2026-10-chautari.sql`, plus the moderators and scheduling
 
 ### Coins, gifts and the listening log
 
-Phase 1 (testers only); the roadmap and open items are in the vault's `Future changes/07-chautari-gifts-and-creator-rewards.md`, the concepts in note 29.
+Phase 1 (testers only); the roadmap and open items are in the vault's `Deferred work/07-chautari-gifts-and-creator-rewards.md`, the concepts in note 29.
 - **Switches (all off by default, so this code ships inert).** Site `CHAUTARI_GIFTS=open` turns on gifts, the wallet and everything coin-related in the app: with it unset, `GET /api/reader/wallet` answers `giftsEnabled: false` without reading the coin tables, and the app (`useGiftsEnabled()`) shows no gift button, coins, shop, earnings or supporters. Crediting needs `REVENUECAT_SECRET_API_KEY` + `REVENUECAT_PROJECT_ID` on the site (else the confirm and webhook routes answer 503), buying needs the RevenueCat keys in the app build. Site `CHAUTARI_LISTEN_LOG=on` turns on the listening log (join context and sessions); off, nothing is recorded and presence is unaffected. So the site can be deployed before the coins and listen-log SQL reach production; run the SQL before switching either on.
 - **Buying.** Coin packs are consumable store products (`coins_100`, `coins_500`, `coins_1000`) sold through RevenueCat. Screens use only `src/lib/billing` (`BillingProvider`); `revenueCat.ts` is the one file that touches the SDK, so replacing RevenueCat is one file plus a server adapter. Keys: `EXPO_PUBLIC_REVENUECAT_TEST_KEY` (Test Store, development builds only, from `local-backend.env`), `EXPO_PUBLIC_REVENUECAT_IOS_KEY` / `_ANDROID_KEY` (production project). `keys.ts` refuses a Test Store key outside development. `BillingIdentity` (in `_layout.tsx`) logs the buyer in under their Clerk id.
 - **Crediting.** Only the server adds coins. After a purchase the app sends the store transaction id to `POST /api/payments/confirm`; the site looks it up at RevenueCat (v2 secret key, read-only: `customer_information:purchases:read` and `project_configuration:products:read`, because purchase records name RevenueCat's `prod…` id, not `coins_500`), checks it belongs to the caller, and credits it. Opening the coin shop may send `{ sync: true }` instead, but only when `src/features/wallet/syncPolicy.ts` says so (a purchase on this phone wasn't confirmed, or a day has passed): the server lists the reader's purchases at RevenueCat, skips those already in `store_purchases` (one query), and credits the rest (the SDK's on-phone purchase history uses `o1_…` ids the REST API can't look up, so the phone never sends those). RevenueCat's webhook (`POST /api/payments/revenuecat`, checked against `REVENUECAT_WEBHOOK_AUTH`) is the backstop and the only path for refunds. Both go through `applyPurchaseEvent` (site `src/lib/payments/`), keyed on the store's transaction id, so a purchase is credited once.

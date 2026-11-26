@@ -43,4 +43,4 @@ Docs: https://docs.expo.dev/eas/index.md
 
 ## Project notes
 
-The Obsidian vault at `/home/setobagh/Desktop/ICN/ProjectInfo/ICN-app/` holds the learning notes (`Revision for Later/`) and the backlog (`Future changes/`). See the "Notes vault" section of `CLAUDE.md` for how they are kept.
+The Obsidian vault at `/home/setobagh/Desktop/ICN/ProjectInfo/ICN-app/` holds the learning notes (`Developer Education/`), the backlog (`Deferred work/`), the last session's context (`Where we left off/`), feature requests and command references. See the "Notes vault" section of `CLAUDE.md` for how they are kept.
