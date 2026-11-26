@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
 import { HandButton } from "./HandButton";
 import { REACTIONS, type ReactionId } from "@/features/chautari/reactions";
-import { HandIcon, MicIcon, ReactIcon } from "./RoomIcons";
+import { HandIcon, HangUpIcon, LeaveIcon, MicIcon, ReactIcon } from "./RoomIcons";
 
 /**
- * The bar under a Chautari room: leave on the left, the reader's own voice on
- * the right. Speakers get the microphone, listeners get the hand; which one
- * appears is decided by the server's grant, never by the button. Everyone in
- * the room gets the reaction button, which opens a row of emoji above the bar.
+ * The bar under a Chautari room. On the left, the host's red hang-up button
+ * or everyone else's door (the host and moderators then choose: leave quietly
+ * or end the room for everyone); on the right,
+ * the reader's own voice. Speakers get the microphone, listeners get the hand; which one
+ * appears is decided by the server's grant, never by the button. The host and
+ * moderators also get applause (a clap sound everyone hears). Everyone in the
+ * room gets the reaction button, which opens a row of emoji above the bar.
  */
 
 /** The emoji row closes itself after this long without a tap. */
@@ -30,11 +33,12 @@ export function RoomControls({
   canPublish,
   micEnabled,
   onToggleMic,
-  onEnd,
   onLeave,
   handRaised,
   handBusy,
   onToggleHand,
+  onClap,
+  clapBusy = false,
   onReact,
   onGift,
   connected,
@@ -48,11 +52,14 @@ export function RoomControls({
   canPublish: boolean;
   micEnabled: boolean;
   onToggleMic: () => void;
-  onEnd: () => void;
+  /** The host and moderators get a choice: leave quietly or end the room. */
   onLeave: () => void;
   handRaised: boolean;
   handBusy: boolean;
   onToggleHand: () => void;
+  /** Host or moderator: applause everyone in the room hears. */
+  onClap?: () => void;
+  clapBusy?: boolean;
   /** React with an emoji (everyone in the room). */
   onReact?: (reaction: ReactionId) => void;
   /** Anyone but the host, when gifts are on: opens the gift sheet. */
@@ -113,25 +120,24 @@ export function RoomControls({
         ]}
       >
         <Pressable
-          onPress={isHost ? onEnd : onLeave}
+          onPress={onLeave}
           accessibilityRole="button"
           accessibilityLabel={
-            isHost ? "End this room for everyone" : "Leave this room"
+            isHost ? "Leave or end this room" : "Leave this room"
           }
           style={({ pressed }) => [
-            styles.leave,
-            { borderColor: isHost ? palette.red : palette.rule2 },
+            styles.round,
+            isHost
+              ? { borderColor: palette.red, backgroundColor: palette.red }
+              : { borderColor: palette.rule2 },
             pressed && styles.pressed,
           ]}
         >
-          <Text
-            style={[
-              styles.leaveText,
-              { color: isHost ? palette.red : palette.ink },
-            ]}
-          >
-            {isHost ? "End room" : "Leave quietly"}
-          </Text>
+          {isHost ? (
+            <HangUpIcon size={24} color="#ffffff" />
+          ) : (
+            <LeaveIcon size={22} color={palette.ink} />
+          )}
         </Pressable>
 
         <View style={styles.spacer} />
@@ -162,6 +168,32 @@ export function RoomControls({
                 </Text>
               </View>
             ) : null}
+          </Pressable>
+        ) : null}
+
+        {canModerate && onClap ? (
+          <Pressable
+            onPress={() => {
+              tick();
+              onClap();
+            }}
+            disabled={clapBusy || !connected}
+            accessibilityRole="button"
+            accessibilityLabel="Applause: play a clapping sound for everyone in the room"
+            accessibilityState={{ disabled: clapBusy || !connected, busy: clapBusy }}
+            style={({ pressed }) => [
+              styles.round,
+              { borderColor: palette.rule2, opacity: connected ? 1 : 0.4 },
+              pressed && styles.pressed,
+            ]}
+          >
+            {clapBusy ? (
+              <ActivityIndicator size="small" color={palette.ink} />
+            ) : (
+              <Text style={styles.clap} accessible={false}>
+                👏
+              </Text>
+            )}
           </Pressable>
         ) : null}
 
@@ -282,32 +314,20 @@ const styles = StyleSheet.create({
   trayPressed: { transform: [{ scale: 1.25 }] },
   trayEmoji: { fontSize: 28, lineHeight: 34 },
   giftEmoji: { fontSize: 22, lineHeight: 28 },
+  clap: { fontSize: 22, lineHeight: 28 },
   bar: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: spacing.gutter,
+    paddingHorizontal: 16,
     paddingTop: 12,
     borderTopWidth: 1,
-    gap: 12,
-  },
-  leave: {
-    minHeight: 44,
-    paddingHorizontal: 18,
-    borderWidth: 1,
-    borderRadius: 22,
-    justifyContent: "center",
-  },
-  leaveText: {
-    fontFamily: fontFamilies.sansMedium,
-    fontSize: 11.5,
-    letterSpacing: 1.2,
-    textTransform: "uppercase",
+    gap: 8,
   },
   spacer: { flex: 1 },
   round: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",

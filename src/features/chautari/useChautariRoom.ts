@@ -51,6 +51,8 @@ export type RoomPhase =
  */
 export type EndReason =
   | "host_ended"
+  /** Closed by the server: no host or moderator in it for 5 minutes. */
+  | "unattended"
   | "removed"
   | "connection_lost"
   | "joined_elsewhere"
@@ -307,6 +309,9 @@ export function useChautariRoom(
    * generation is stale does nothing.
    */
   const generation = useRef(0);
+  // The server said it is closing the room because nobody ran it; the
+  // disconnect that follows is then not the host's doing.
+  const closingUnattended = useRef(false);
 
   /*
    * The phase, readable synchronously.
@@ -432,6 +437,7 @@ export function useChautariRoom(
     const mine = ++generation.current;
     setError(null);
     setEndReason(null);
+    closingUnattended.current = false;
     setPhaseSafely("requesting");
 
     void (async () => {
@@ -482,6 +488,7 @@ export function useChautariRoom(
               if (packet) giftListeners.current.forEach((listener) => listener(packet));
             } else if (topic === ROOM_TOPIC) {
               const packet = decodeRoomEvent(payload);
+              if (packet?.type === "closing") closingUnattended.current = true;
               if (packet) roomEventListeners.current.forEach((listener) => listener(packet));
             } else if (topic === REACTION_TOPIC) {
               const items = decodeReactionsPacket(payload);
@@ -531,7 +538,8 @@ export function useChautariRoom(
              * It is not an ending worth a screen — the user already knows.
              */
             if (reason === DisconnectReason.CLIENT_INITIATED) return;
-            setEndReason(endReasonFrom(reason));
+            const ended = endReasonFrom(reason);
+            setEndReason(ended === "host_ended" && closingUnattended.current ? "unattended" : ended);
             setPhaseSafely("ended");
             membersRef.current = [];
             setMembers([]);
@@ -721,6 +729,10 @@ export const END_MESSAGES: Record<EndReason, { title: string; message: string }>
   host_ended: {
     title: "This conversation has ended",
     message: "The host closed the room.",
+  },
+  unattended: {
+    title: "This conversation has ended",
+    message: "The host and moderators had all left, so the room closed after 5 minutes.",
   },
   removed: {
     title: "You were removed from this room",

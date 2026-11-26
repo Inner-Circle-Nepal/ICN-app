@@ -21,6 +21,7 @@ import {
   endRoom,
   getRoomDetails,
   moderate,
+  playRoomEffect,
   setHandRaised,
   startRoom,
   updateRoomSettings,
@@ -55,6 +56,7 @@ import { LockIcon } from "@/components/chautari/RoomIcons";
 import { useJoinRequests } from "@/features/chautari/useJoinRequests";
 import { PersonSheet } from "@/components/chautari/PersonSheet";
 import { HandsSheet } from "@/components/chautari/HandsSheet";
+import { LeaveSheet } from "@/components/chautari/LeaveSheet";
 import { GiftSheet } from "@/components/chautari/GiftSheet";
 import { GiftBurst } from "@/components/chautari/GiftBurst";
 import { SupportersSheet } from "@/components/chautari/SupportersSheet";
@@ -399,21 +401,22 @@ function ChautariRoomScreenActive() {
     [act],
   );
 
-  const confirmEnd = useCallback(() => {
-    Alert.alert("End this room?", "Everyone will be disconnected. This cannot be undone.", [
-      { text: "Keep talking", style: "cancel" },
-      {
-        text: "End room",
-        style: "destructive",
-        onPress: () => {
-          void endRoom(getTokenRef.current, slug)
-            .then(leaveAndBack)
-            .catch((e: unknown) =>
-              setNotice(e instanceof ChautariError ? e.message : "Could not end the room."),
-            );
-        },
-      },
-    ]);
+  // The host's and moderators' way out (LeaveSheet): leave quietly, or end
+  // the room for everyone once they confirm it there.
+  const [leaveOpen, setLeaveOpen] = useState(false);
+  const [ending, setEnding] = useState(false);
+  const endForEveryone = useCallback(() => {
+    setEnding(true);
+    void endRoom(getTokenRef.current, slug)
+      .then(() => {
+        setLeaveOpen(false);
+        leaveAndBack();
+      })
+      .catch((e: unknown) => {
+        setLeaveOpen(false);
+        setNotice(e instanceof ChautariError ? e.message : "Could not end the room.");
+      })
+      .finally(() => setEnding(false));
   }, [slug, leaveAndBack]);
 
   /*
@@ -509,11 +512,20 @@ function ChautariRoomScreenActive() {
     }, [connected]),
   );
 
-  /*
-   * Applause from hosts on older app versions still plays here (this app no
-   * longer sends it: 👏 is one of the reactions now).
-   */
+  /* Applause: the host or a moderator asks the server; every app plays it. */
   const effectLine = useRoomEffects(room);
+  const [clapBusy, setClapBusy] = useState(false);
+  const clap = async () => {
+    if (clapBusy) return;
+    setClapBusy(true);
+    try {
+      await playRoomEffect(getToken, slug, "clap");
+    } catch (e) {
+      setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
+    } finally {
+      setClapBusy(false);
+    }
+  };
   // Emoji reactions: anyone in the room; they float up from the bottom right.
   const reactions = useRoomReactions(slug, room);
 
@@ -594,17 +606,9 @@ function ChautariRoomScreenActive() {
   const joinRequests = useJoinRequests(slug, room, canModerate);
   const [requestsOpen, setRequestsOpen] = useState(false);
 
-  /*
-   * A moderator has two ways out: slip away, or end the room for everyone
-   * (they hold the host's controls). The host's own button always ends it.
-   */
-  const chooseLeave = useCallback(() => {
-    Alert.alert("Leave this room?", undefined, [
-      { text: "Leave quietly", onPress: leaveAndBack },
-      { text: "End room for everyone", style: "destructive", onPress: confirmEnd },
-      { text: "Cancel", style: "cancel" },
-    ]);
-  }, [leaveAndBack, confirmEnd]);
+  // Nobody else running the room: the site closes it 5 minutes after the
+  // last host or moderator leaves (the site's chautari-unattended job).
+  const lastInCharge = !room.members.some((m) => !m.isLocal && (m.isHost || m.isModerator));
 
   const speakers = useMemo(
     () =>
@@ -1015,6 +1019,19 @@ function ChautariRoomScreenActive() {
         onDecide={(requestId, approve) => joinRequests.decide.mutateAsync({ requestId, approve })}
       />
 
+      <LeaveSheet
+        key={leaveOpen ? "open" : "closed"}
+        visible={leaveOpen && canModerate}
+        lastInCharge={lastInCharge}
+        ending={ending}
+        onClose={() => setLeaveOpen(false)}
+        onLeave={() => {
+          setLeaveOpen(false);
+          leaveAndBack();
+        }}
+        onEnd={endForEveryone}
+      />
+
       <HandsSheet
         visible={handsOpen && canModerate}
         hands={hands}
@@ -1075,11 +1092,12 @@ function ChautariRoomScreenActive() {
         canPublish={room.canPublish}
         micEnabled={room.micEnabled}
         onToggleMic={room.toggleMic}
-        onEnd={confirmEnd}
-        onLeave={isModerator ? chooseLeave : leaveAndBack}
+        onLeave={canModerate ? () => setLeaveOpen(true) : leaveAndBack}
         handRaised={handRaised}
         handBusy={handBusy}
         onToggleHand={() => void toggleHand()}
+        onClap={() => void clap()}
+        clapBusy={clapBusy}
         onReact={isSignedIn ? reactions.react : undefined}
         onGift={canGift ? () => setGiftOpen(true) : undefined}
         connected={room.phase === "connected"}

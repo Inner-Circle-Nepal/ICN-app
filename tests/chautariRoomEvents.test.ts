@@ -34,4 +34,13 @@ describe("decodeRoomEvent", () => {
   it("reads a list refresh", () => {
     expect(decodeRoomEvent(bytes({ type: "join_requests_changed" }))).toEqual({ type: "join_requests_changed" });
   });
+
+  it("reads the server closing an unattended room, and nothing else as closing", () => {
+    expect(decodeRoomEvent(bytes({ type: "closing", reason: "unattended" }))).toEqual({
+      type: "closing",
+      reason: "unattended",
+    });
+    expect(decodeRoomEvent(bytes({ type: "closing" }))).toBeNull();
+    expect(decodeRoomEvent(bytes({ type: "closing", reason: "host" }))).toBeNull();
+  });
 });
