@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AccessibilityInfo } from "react-native";
-import type { AudioPlayer } from "expo-audio";
-
-import { audioModule } from "@/lib/audio/module";
+import { playRoomSound, roomSoundPlayer } from "@/lib/audio/roomSound";
 import type { GiftPacket } from "./gifts";
 import type { ChautariRoomState } from "./useChautariRoom";
 
@@ -29,33 +27,19 @@ export interface ShownGift {
  * from a minute ago. Screen readers hear each one announced.
  *
  * Each gift plays the chime as its card appears, so gifts in a burst chime
- * one after another rather than on top of each other. Like the clap, it goes
- * through the guarded audio seam and leaves the audio mode alone, so it
- * plays over the room without interrupting it.
+ * one after another rather than on top of each other. Like the clap, it plays
+ * through `roomSound`, which keeps the chime from cutting the room's audio
+ * on iPhones (see there).
  */
 export function useRoomGifts(room: ChautariRoomState): ShownGift | null {
   const { onGiftPacket } = room;
   const [current, setCurrent] = useState<ShownGift | null>(null);
   const waiting = useRef<ShownGift[]>([]);
   const counter = useRef(0);
-  const playerRef = useRef<AudioPlayer | null>(null);
 
+  // Load the chime before the first gift. The player outlives the screen.
   useEffect(() => {
-    let player: AudioPlayer | null = null;
-    try {
-      player = audioModule()?.createAudioPlayer(CHIME) ?? null;
-    } catch {
-      /* no sound, the card still shows */
-    }
-    playerRef.current = player;
-    return () => {
-      playerRef.current = null;
-      try {
-        player?.remove();
-      } catch {
-        /* already gone */
-      }
-    };
+    roomSoundPlayer(CHIME);
   }, []);
 
   useEffect(
@@ -75,15 +59,7 @@ export function useRoomGifts(room: ChautariRoomState): ShownGift | null {
 
   useEffect(() => {
     if (!current) return;
-    const player = playerRef.current;
-    try {
-      if (player) {
-        void player.seekTo(0);
-        player.play();
-      }
-    } catch {
-      /* a missing sound must never break the room */
-    }
+    playRoomSound(CHIME);
     const t = setTimeout(() => {
       const [next, ...rest] = waiting.current;
       waiting.current = rest;
