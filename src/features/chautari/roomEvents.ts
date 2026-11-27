@@ -1,8 +1,9 @@
 /**
  * Room events the server sends on their own topic (the site's
  * src/lib/chautari/roomEvents.ts): the room's lock and "members may invite"
- * changed (to everyone), or someone is asking to join (only to the host and
- * moderators). Parsed defensively: anything malformed is ignored. Pure, for
+ * changed (to everyone), someone is asking to join (only to the host and
+ * moderators), or the server is about to close the room because nobody ran it
+ * (`closing`, to everyone, just before LiveKit disconnects them). Parsed defensively: anything malformed is ignored. Pure, for
  * tests.
  */
 
@@ -17,7 +18,8 @@ export type RoomEventPacket =
       username: string | null;
       avatarUrl: string | null;
     }
-  | { type: "join_requests_changed" };
+  | { type: "join_requests_changed" }
+  | { type: "closing"; reason: "unattended" };
 
 const text = (v: unknown, max: number): string | null =>
   typeof v === "string" && v.trim() ? v.trim().slice(0, max) : null;
@@ -42,6 +44,7 @@ export function decodeRoomEvent(payload: Uint8Array): RoomEventPacket | null {
       };
     }
     if (p.type === "join_requests_changed") return { type: "join_requests_changed" };
+    if (p.type === "closing" && p.reason === "unattended") return { type: "closing", reason: "unattended" };
   } catch {
     /* not ours */
   }

@@ -6,13 +6,14 @@
 #   npm run bots -- live <bot> [title]               open a live room now
 #   npm run bots -- book <bot> [minutes] [title]     book one ahead (default 60 min)
 #   npm run bots -- golive <slug>                    start a booked room
-#   npm run bots -- end <slug>                       end a room
+#   npm run bots -- end <slug>                       end a room (database only: unlike End room in the app, nobody is disconnected)
 #   npm run bots -- list                             rooms and bots
 #   npm run bots -- avatars                          upload the bots' profile pictures (after a db reset)
 #   npm run bots -- staff                            local newsroom login staff@local.test / staff1234 (superadmin)
 #   npm run bots -- join <slug> [bot…]               bots sit in a live room as listeners until Ctrl-C (default: all)
 #   npm run bots -- stage <slug> <username> [off]    bring a reader on stage as a speaker, as if the host approved them (or back to listening)
 #   npm run bots -- speak <slug> <bot>               a bot speaks (a looping melody) until Ctrl-C; also prints how loud others are (unreliable locally)
+#   npm run bots -- sweep                            every minute until Ctrl-C, run the site's unattended-room check (closes live rooms with no host or moderator in them for 5 min; the droplet's cron does this in production)
 #
 #   Invite-only rooms (the room must be live; join from the phone first to see the request arrive):
 #   npm run bots -- lock <slug> [off]                make a room invite only (or public again)
@@ -144,6 +145,17 @@ case "$cmd" in
   end)
     [ $# -eq 1 ] || usage
     db -tA -v slug="$1" <<<"update public.chautari_rooms set status = 'ended', ended_at = now(), updated_at = now() where slug = :'slug' and status <> 'ended' returning slug || '  ended';" ;;
+  sweep)
+    # The site's /api/cron/chautari-unattended, as the droplet's cron calls it.
+    secret=$(grep -m1 -E '^CRON_SECRET=' "$SITE_ENV" | cut -d= -f2- | tr -d '"'"'")
+    echo "Checking every minute for rooms nobody has run for 5 minutes. Ctrl-C to stop."
+    while true; do
+      printf '%s  ' "$(date +%H:%M:%S)"
+      printf 'header = "Authorization: Bearer %s"\n' "$secret" |
+        curl -sS -K - http://localhost:3001/api/cron/chautari-unattended || true
+      echo
+      sleep 60
+    done ;;
   staff)
     # A newsroom (admin) login for http://localhost:3001/admin, LOCAL only.
     # Safe to re-run: it resets the password and the superadmin profile.

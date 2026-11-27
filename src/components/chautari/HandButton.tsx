@@ -124,18 +124,18 @@ export function HandButton({
 }
 
 const styles = StyleSheet.create({
-  wrap: { width: 56, height: 56, alignItems: "center", justifyContent: "center" },
+  wrap: { width: 48, height: 48, alignItems: "center", justifyContent: "center" },
   ring: {
     position: "absolute",
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 2,
   },
   round: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     borderWidth: 1.5,
     alignItems: "center",
     justifyContent: "center",
