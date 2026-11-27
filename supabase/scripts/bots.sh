@@ -11,6 +11,8 @@
 #   npm run bots -- avatars                          upload the bots' profile pictures (after a db reset)
 #   npm run bots -- staff                            local newsroom login staff@local.test / staff1234 (superadmin)
 #   npm run bots -- join <slug> [bot…]               bots sit in a live room as listeners until Ctrl-C (default: all)
+#   npm run bots -- stage <slug> <username> [off]    bring a reader on stage as a speaker, as if the host approved them (or back to listening)
+#   npm run bots -- speak <slug> <bot>               a bot speaks (a looping melody) until Ctrl-C; also prints how loud others are (unreliable locally)
 #
 #   Invite-only rooms (the room must be live; join from the phone first to see the request arrive):
 #   npm run bots -- lock <slug> [off]                make a room invite only (or public again)
@@ -304,6 +306,34 @@ where p.clerk_user_id = any(string_to_array(:'ids', ','))
   and p.clerk_user_id <> (select host_clerk_id from public.chautari_rooms where slug = :'slug');
 SQL
       node "$here/livekit-bots/join.mjs" "$lk" "$SITE_ENV" 2>&1 |
+      grep --line-buffered -v -e '^{"level"' -e 'Decoder is supported' ;;
+  stage)
+    [ $# -ge 2 ] || usage
+    slug=$1; who=$(reader_id "$2"); on=on; role=speaker
+    [ "${3:-}" = off ] && { on=off; role=listener; }
+    lk=$(db -tA -v slug="$slug" <<<"select livekit_room from public.chautari_rooms where slug = :'slug' and status = 'live';")
+    [ -n "$lk" ] || { echo "No live room called $slug." >&2; exit 1; }
+    # The record first, as the site's moderate route does, then the live room.
+    db -tA -v slug="$slug" -v who="$who" -v role="$role" >/dev/null <<'SQL'
+update public.chautari_speaker_requests set status = 'approved', decided_at = now()
+where room_id = (select id from public.chautari_rooms where slug = :'slug') and clerk_user_id = :'who' and status = 'pending';
+insert into public.chautari_participants (room_id, clerk_user_id, role, left_at)
+values ((select id from public.chautari_rooms where slug = :'slug'), :'who', :'role', null)
+on conflict (room_id, clerk_user_id) do update set role = excluded.role, left_at = null;
+SQL
+    node "$here/livekit-stage.mjs" "$lk" "$who" "$on" "$SITE_ENV" && echo "@${2#@} is now a $role" ;;
+  speak)
+    [ $# -eq 2 ] || usage
+    slug=$1; id=$(bot_id "$2")
+    lk=$(db -tA -v slug="$slug" <<<"select livekit_room from public.chautari_rooms where slug = :'slug' and status = 'live';")
+    [ -n "$lk" ] || { echo "No live room called $slug." >&2; exit 1; }
+    [ -d "$here/livekit-bots/node_modules/@livekit/rtc-node" ] ||
+      npm install --prefix "$here/livekit-bots" --no-audit --no-fund >/dev/null || exit 1
+    db -tA -F $'\t' -v id="$id" <<'SQL' |
+select p.clerk_user_id, coalesce(p.display_name, p.username), p.username, coalesce(p.avatar_url, '')
+from public.reader_profiles p where p.clerk_user_id = :'id';
+SQL
+      node "$here/livekit-bots/speak.mjs" "$lk" "$SITE_ENV" 2>&1 |
       grep --line-buffered -v -e '^{"level"' -e 'Decoder is supported' ;;
   gift)
     [ $# -ge 2 ] || usage
