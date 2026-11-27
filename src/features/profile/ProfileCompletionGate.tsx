@@ -23,6 +23,7 @@ import { useMyProfile } from "./useMyProfile";
  */
 
 const COMPLETION_ROUTE = "/profile/complete";
+const SIGN_IN_ROUTE = "/sign-in";
 
 export function ProfileCompletionGate() {
   const { needsCompletion } = useMyProfile();
@@ -32,6 +33,11 @@ export function ProfileCompletionGate() {
   useEffect(() => {
     if (!needsCompletion) return;
     if (pathname === COMPLETION_ROUTE) return;
+    // Sign-in sends a new account to completion itself. Redirecting from
+    // here too raced it: both replaced the sign-in screen, and a new reader
+    // got the form twice. If sign-in can't tell (the profile fetch failed),
+    // it closes and this guard catches them on the next screen.
+    if (pathname === SIGN_IN_ROUTE) return;
     router.replace(COMPLETION_ROUTE);
   }, [needsCompletion, pathname, router]);
 
