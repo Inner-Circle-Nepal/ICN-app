@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import * as Haptics from "expo-haptics";
 
 import { useTheme } from "@/hooks/useTheme";
@@ -35,10 +35,8 @@ export function RoomControls({
   onToggleMic,
   onLeave,
   handRaised,
-  handBusy,
   onToggleHand,
   onClap,
-  clapBusy = false,
   onReact,
   onGift,
   connected,
@@ -55,11 +53,9 @@ export function RoomControls({
   /** The host and moderators get a choice: leave quietly or end the room. */
   onLeave: () => void;
   handRaised: boolean;
-  handBusy: boolean;
   onToggleHand: () => void;
   /** Host or moderator: applause everyone in the room hears. */
   onClap?: () => void;
-  clapBusy?: boolean;
   /** React with an emoji (everyone in the room). */
   onReact?: (reaction: ReactionId) => void;
   /** Anyone but the host, when gifts are on: opens the gift sheet. */
@@ -177,23 +173,19 @@ export function RoomControls({
               tick();
               onClap();
             }}
-            disabled={clapBusy || !connected}
+            disabled={!connected}
             accessibilityRole="button"
             accessibilityLabel="Applause: play a clapping sound for everyone in the room"
-            accessibilityState={{ disabled: clapBusy || !connected, busy: clapBusy }}
+            accessibilityState={{ disabled: !connected }}
             style={({ pressed }) => [
               styles.round,
               { borderColor: palette.rule2, opacity: connected ? 1 : 0.4 },
               pressed && styles.pressed,
             ]}
           >
-            {clapBusy ? (
-              <ActivityIndicator size="small" color={palette.ink} />
-            ) : (
-              <Text style={styles.clap} accessible={false}>
-                👏
-              </Text>
-            )}
+            <Text style={styles.clap} accessible={false}>
+              👏
+            </Text>
           </Pressable>
         ) : null}
 
@@ -273,8 +265,8 @@ export function RoomControls({
         ) : (
           <HandButton
             raised={handRaised}
-            busy={handBusy}
-            disabled={handBusy || !connected}
+            busy={false}
+            disabled={!connected}
             onPress={() => {
               tick();
               onToggleHand();

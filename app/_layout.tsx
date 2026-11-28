@@ -42,6 +42,7 @@ import { ActiveRoomProvider } from "@/features/chautari/ActiveRoom";
 import { PushNudgeProvider } from "@/features/pushNudge/context";
 import { PushNudgeSheet } from "@/features/pushNudge/PushNudgeSheet";
 import { ProfileCompletionGate } from "@/features/profile/ProfileCompletionGate";
+import { UpdateGate } from "@/features/appUpdate/UpdateGate";
 import { PushAccountLink } from "@/features/profile/PushAccountLink";
 import { BillingIdentity } from "@/features/wallet/BillingIdentity";
 import {
@@ -274,6 +275,8 @@ function AppShell() {
       {isClerkConfigured ? <ProfileCompletionGate /> : null}
       {isClerkConfigured ? <PushAccountLink /> : null}
       {isClerkConfigured ? <BillingIdentity /> : null}
+      {/* Last, so it covers everything above when this version is too old. */}
+      <UpdateGate />
     </SafeAreaView>
   );
 }

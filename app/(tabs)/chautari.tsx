@@ -143,7 +143,13 @@ function ChautariLobby() {
   const openRoom = (room: DiscoverRoom) =>
     router.push({
       pathname: "/chautari/[slug]",
-      params: { slug: room.slug, title: room.title, host: room.hostName ?? "" },
+      params: {
+        slug: room.slug,
+        title: room.title,
+        host: room.hostName ?? "",
+        // The list saw it live: the room screen joins without waiting for its details.
+        ...(room.status === "live" ? { live: "1" } : {}),
+      },
     });
 
   return (
@@ -215,7 +221,9 @@ function EmptyFallback({ isLoading, palette }: { isLoading: boolean; palette: Th
 
 /** Mounted only when Clerk is configured, so `useAuth` is safe here. */
 function HostPromptSignedIn() {
-  const { isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useAuth();
+  // Until Clerk has read the saved sign-in, don't offer "Sign in to host".
+  if (!isLoaded) return null;
   return <HostPrompt signedIn={Boolean(isSignedIn)} />;
 }
 
@@ -382,9 +390,22 @@ function SignedInBar({ palette }: { palette: ThemePalette }) {
  */
 function SignedInBarActive({ palette }: { palette: ThemePalette }) {
   const router = useRouter();
-  const { isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
   const { profile } = useMyProfile();
+
+  // Clerk is still reading the saved sign-in: neither "Sign in" nor a name
+  // yet, only the bar and the earn link, so nothing wrong flashes.
+  if (!isLoaded) {
+    return (
+      <View
+        style={[styles.signedInBar, { borderTopColor: palette.rule, borderBottomColor: palette.rule }]}
+      >
+        <View style={styles.signedInIdentity} />
+        <EarnLink />
+      </View>
+    );
+  }
 
   if (!isSignedIn) {
     return (

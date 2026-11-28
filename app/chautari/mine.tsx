@@ -1,5 +1,5 @@
 import React from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
 import { useQuery } from "@tanstack/react-query";
@@ -11,6 +11,7 @@ import { getMyRooms, type MyRoom } from "@/lib/api/chautari";
 import { formatBooking } from "@/features/chautari/schedule";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
+import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 
 /**
@@ -36,7 +37,7 @@ function MyRoomsUnavailable() {
 function MyRoomsActive() {
   const router = useRouter();
   const { palette } = useTheme();
-  const { isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
 
   const rooms = useQuery({
     queryKey: ["chautari-my-rooms"],
@@ -47,13 +48,26 @@ function MyRoomsActive() {
 
   const back = () => (router.canGoBack() ? router.back() : router.replace("/chautari"));
 
+  // Clerk still reading the saved sign-in: wait rather than say "Sign in".
+  if (!isLoaded) {
+    return (
+      <Frame onBack={back}>
+        <View style={styles.loading}>
+          <ActivityIndicator color={palette.quiet} />
+        </View>
+      </Frame>
+    );
+  }
+
   if (!isSignedIn) {
     return (
       <Frame onBack={back}>
-        <ErrorState
+        <EmptyState
+          kicker="Chautari"
           title="Sign in to see your rooms"
-          message="Rooms you host or moderate appear here."
-          onRetry={() => router.push("/sign-in")}
+          description="Rooms you host or moderate appear here."
+          actionLabel="Sign in"
+          onAction={() => router.push("/sign-in")}
         />
       </Frame>
     );
@@ -173,6 +187,7 @@ function Frame({ children, onBack }: { children: React.ReactNode; onBack: () => 
 }
 
 const styles = StyleSheet.create({
+  loading: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 48 },
   screen: { flex: 1 },
   topBar: {
     height: 48,

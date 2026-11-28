@@ -1,16 +1,19 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
   RefreshControl,
   StyleSheet,
   View,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from "react-native";
 import {
   useHomeFeed,
   useInfiniteLatestArticles,
 } from "@/features/articles/useArticles";
 import { useTheme } from "@/hooks/useTheme";
+import { onTabReselect } from "@/lib/navigation/tabReselect";
 import type { ArticleCard } from "@/types/domain";
 
 import { AppHeader } from "@/components/AppHeader";
@@ -73,6 +76,28 @@ export default function HomeScreen() {
     void wire.refetch();
   }, [refetch, wire]);
 
+  /*
+   * Tapping Home while on Home: back to the first story if the reader has
+   * swiped down the feed, or, already there, fetch what's new (the same as
+   * pulling down, spinner included).
+   */
+  const listRef = useRef<FlatList<ArticleCard>>(null);
+  const offsetRef = useRef(0);
+  const onScroll = useCallback((e: NativeSyntheticEvent<NativeScrollEvent>) => {
+    offsetRef.current = e.nativeEvent.contentOffset.y;
+  }, []);
+  useEffect(
+    () =>
+      onTabReselect("/", () => {
+        if (offsetRef.current > pageHeight / 2) {
+          listRef.current?.scrollToOffset({ offset: 0, animated: true });
+        } else {
+          refresh();
+        }
+      }),
+    [pageHeight, refresh],
+  );
+
   const loadMore = useCallback(() => {
     if (wire.hasNextPage && !wire.isFetchingNextPage) void wire.fetchNextPage();
   }, [wire]);
@@ -130,7 +155,10 @@ export default function HomeScreen() {
       <View style={styles.fill} onLayout={onLayout}>
         {pageHeight > 0 ? (
           <FlatList
+            ref={listRef}
             data={stories}
+            onScroll={onScroll}
+            scrollEventThrottle={100}
             keyExtractor={(item) => item.slug}
             renderItem={renderItem}
             getItemLayout={getItemLayout}

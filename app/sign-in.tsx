@@ -10,7 +10,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { Redirect, useRouter } from "expo-router";
 import { useSignIn, useSignUp, useAuth } from "@clerk/clerk-expo";
 import Svg, { Path } from "react-native-svg";
 import * as Crypto from "expo-crypto";
@@ -21,7 +21,7 @@ import { fontFamilies, spacing } from "@/theme/tokens";
 import { ErrorState } from "@/components/ErrorState";
 import { useQueryClient } from "@tanstack/react-query";
 import { getMyProfile } from "@/lib/api/readerProfile";
-import { MY_PROFILE_KEY } from "@/features/profile/useMyProfile";
+import { myProfileKey } from "@/features/profile/useMyProfile";
 import { ErrorMessage } from "@/components/ErrorMessage";
 
 /**
@@ -79,6 +79,12 @@ function SignInScreenActive() {
   const [isNewAccount, setIsNewAccount] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /*
+   * Set once a code is accepted: from here on Clerk says "signed in" while we
+   * still ask the server about the profile, and the screen keeps its spinner
+   * until `afterSignIn` moves on.
+   */
+  const [finishing, setFinishing] = useState(false);
 
   const ready = signInLoaded && signUpLoaded;
 
@@ -94,17 +100,15 @@ function SignInScreenActive() {
    * completion gate instead of back into the app. Everyone else goes
    * wherever they came from.
    *
-   * Fetching through React Query (not a bare `getMyProfile`) seeds the
-   * cache so the layout's `useMyProfile` + the next screen read the same
-   * answer without a second request, and so the gate in `_layout.tsx`
-   * does not redirect-flicker us in the common case.
+   * The answer seeds the cache under this account's key, so the layout's
+   * `useMyProfile` and the next screen read it without a second request.
    */
   const afterSignIn = async () => {
     try {
-      const profile = await queryClient.fetchQuery({
-        queryKey: MY_PROFILE_KEY,
-        queryFn: () => getMyProfile(getToken),
-      });
+      // Always the server's answer for the account that just signed in, never
+      // a cached one (see `myProfileKey`).
+      const profile = await getMyProfile(getToken);
+      if (profile) queryClient.setQueryData(myProfileKey(profile.clerk_user_id), profile);
       if (!profile) {
         router.replace("/profile/complete");
         return;
@@ -120,6 +124,9 @@ function SignInScreenActive() {
   /**
    * Clerk reports an unknown address as a sign-in failure, so a first-time
    * reader is moved to sign-up rather than shown an error they cannot act on.
+   * Only that failure: any other (too many codes asked for, the network, a
+   * sign-in already under way) is shown as it is. Falling through to sign-up
+   * on those told existing readers their own address was "taken".
    */
   const sendCode = async () => {
     const address = email.trim().toLowerCase();
@@ -134,7 +141,11 @@ function SignInScreenActive() {
       await signIn!.create({ identifier: address, strategy: "email_code" });
       setIsNewAccount(false);
       setStage("code");
-    } catch {
+    } catch (signInError) {
+      if (!isUnknownAddress(signInError)) {
+        setError(readableClerkError(signInError, "We could not send a code to that address."));
+        return;
+      }
       try {
         await signUp!.create({ emailAddress: address });
         await signUp!.prepareEmailAddressVerification({ strategy: "email_code" });
@@ -164,6 +175,7 @@ function SignInScreenActive() {
           result = await completeSignUpRequirements(signUp!, email);
         }
         if (result.status === "complete") {
+          setFinishing(true);
           await setSignUpActive!({ session: result.createdSessionId });
           await afterSignIn();
           return;
@@ -175,6 +187,7 @@ function SignInScreenActive() {
       } else {
         const result = await signIn!.attemptFirstFactor({ strategy: "email_code", code: entered });
         if (result.status === "complete") {
+          setFinishing(true);
           await setSignInActive!({ session: result.createdSessionId });
           await afterSignIn();
           return;
@@ -199,17 +212,8 @@ function SignInScreenActive() {
     );
   }
 
-  if (isSignedIn) {
-    return (
-      <View style={[styles.screen, { backgroundColor: palette.paper }]}>
-        <ErrorState
-          title="You are signed in"
-          message="Head back to Chautari to join a conversation."
-          onRetry={() => router.replace("/chautari")}
-        />
-      </View>
-    );
-  }
+  // Opened while already signed in (not mid sign-in): nothing to do here.
+  if (isSignedIn && !finishing) return <Redirect href="/chautari" />;
 
   return (
     <KeyboardAvoidingView
@@ -376,6 +380,17 @@ function randomPassword(): string {
   const body = Array.from(Crypto.getRandomBytes(32), (b) => chars[b % chars.length]).join("");
   // One of each class, so any complexity rule on the Clerk side is met.
   return `${body}aZ7#`;
+}
+
+/** Clerk's error codes, e.g. `form_identifier_not_found`. */
+function clerkErrorCodes(e: unknown): string[] {
+  const errs = (e as { errors?: { code?: string }[] })?.errors;
+  return (errs ?? []).map((x) => x.code ?? "").filter(Boolean);
+}
+
+/** Sign-in failed because no account has this address: offer sign-up. */
+function isUnknownAddress(e: unknown): boolean {
+  return clerkErrorCodes(e).includes("form_identifier_not_found");
 }
 
 /** Clerk's errors are structured; show the first message, not a stack. */
