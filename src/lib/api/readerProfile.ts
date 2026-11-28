@@ -88,6 +88,12 @@ type CallOptions = {
   /** Returned (rather than thrown) when the server answers with this status. */
   nullOn?: number;
   /**
+   * With `nullOn`: only that status *with this `reason`* means null. Any other
+   * reply with the same status (a proxy's or a half-deployed site's 404) is
+   * an error, not an answer.
+   */
+  nullReason?: string;
+  /**
    * If `true`, a `getToken` that resolves to `null` means "call anonymously"
    * instead of throwing `not_signed_in`. Used by endpoints that work for
    * both signed-in and signed-out callers (e.g. follow-status, which hides
@@ -99,7 +105,7 @@ type CallOptions = {
 async function call<T>(
   path: string,
   init: RequestInit,
-  { getToken, nullOn, optionalAuth }: CallOptions = {},
+  { getToken, nullOn, nullReason, optionalAuth }: CallOptions = {},
 ): Promise<T | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), READER_FETCH_TIMEOUT_MS);
@@ -134,7 +140,14 @@ async function call<T>(
   }
 
   if (nullOn !== undefined && response.status === nullOn) {
-    return null;
+    if (nullReason === undefined) return null;
+    const reason = await response
+      .clone()
+      .json()
+      .then((p: { reason?: unknown }) => p?.reason)
+      .catch(() => null);
+    if (reason === nullReason) return null;
+    throw new ReaderApiError("server_error", "Something went wrong.", response.status);
   }
 
   let payload: Record<string, unknown>;
@@ -163,7 +176,9 @@ export async function getMyProfile(getToken: GetToken): Promise<MyProfile | null
   const res = await call<{ profile: ReaderProfile; suspension?: MySuspension | null }>(
     "/api/reader/profile/me",
     { method: "GET" },
-    { getToken, nullOn: 404 },
+    // Only the site's own "this account has no profile" sends a reader to the
+    // signup form; see `useMyProfile`'s `needsCompletion`.
+    { getToken, nullOn: 404, nullReason: "profile_missing" },
   );
   if (!res?.profile) return null;
   const s = res.suspension;
