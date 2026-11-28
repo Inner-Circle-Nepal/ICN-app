@@ -1,7 +1,6 @@
 import React, { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Pressable,
   ScrollView,
@@ -30,6 +29,7 @@ import { releasePushToken } from "@/features/profile/PushAccountLink";
 import { CoinWallet } from "@/components/chautari/CoinWallet";
 import { useGiftsEnabled } from "@/features/wallet/useWallet";
 import { Avatar } from "@/components/chautari/Avatar";
+import { ConfirmSheet, type ConfirmRequest } from "@/components/ConfirmSheet";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { useTheme } from "@/hooks/useTheme";
@@ -121,6 +121,14 @@ function ProfileScreenActive() {
   const [error, setError] = useState<string | null>(null);
   const [subscribing, setSubscribing] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  /** The question on screen before sign-out, account deletion or removing the picture. */
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  /*
+   * Signing out or deleting the account: Clerk reports "signed out" a moment
+   * before we leave for Settings, and this page would flash its signed-out
+   * invitation. It shows a spinner instead until it has gone.
+   */
+  const [leaving, setLeaving] = useState(false);
 
   const savedDisplayName = profile?.display_name ?? "";
   const savedBio = profile?.bio ?? "";
@@ -240,23 +248,23 @@ function ProfileScreenActive() {
    */
   const removePhoto = useCallback(() => {
     if (!user || photoBusy) return;
-    Alert.alert("Remove your picture?", "Your initials will be shown instead.", [
-      { text: "Keep it", style: "cancel" },
-      {
-        text: "Remove",
-        style: "destructive",
-        onPress: () => {
-          setPhotoBusy(true);
-          setError(null);
-          void user
-            .setProfileImage({ file: null })
-            .then(() => update.mutateAsync({ avatar_url: null }))
-            .then(() => toast.show({ icon: "check", message: "Your picture has been removed." }))
-            .catch(() => setError("Could not remove that picture."))
-            .finally(() => setPhotoBusy(false));
-        },
+    setConfirm({
+      title: "Remove your picture?",
+      message: "Your initials will be shown instead.",
+      cancelLabel: "Keep it",
+      confirmLabel: "Remove",
+      destructive: true,
+      onConfirm: () => {
+        setPhotoBusy(true);
+        setError(null);
+        return user
+          .setProfileImage({ file: null })
+          .then(() => update.mutateAsync({ avatar_url: null }))
+          .then(() => toast.show({ icon: "check", message: "Your picture has been removed." }))
+          .catch(() => setError("Could not remove that picture."))
+          .finally(() => setPhotoBusy(false));
       },
-    ]);
+    });
   }, [user, photoBusy, update, toast]);
 
   const joinBriefing = useCallback(async () => {
@@ -274,27 +282,28 @@ function ProfileScreenActive() {
   }, [email, headingName, subscribing, toast]);
 
   const confirmSignOut = useCallback(() => {
-    Alert.alert(
-      "Sign out?",
-      "You can read everything without an account. You will need to sign in again to join a Chautari conversation.",
-      [
-        { text: "Stay signed in", style: "cancel" },
-        {
-          text: "Sign out",
-          style: "destructive",
-          onPress: () => {
-            // This phone stops getting the reader's follow alerts first,
-            // while there is still a session to prove who is asking.
-            void releasePushToken(getToken)
-              .then(() => signOut())
-              .then(
-                () => router.replace("/settings"),
-                () => setError("Could not sign out. Please try again."),
-              );
-          },
-        },
-      ],
-    );
+    setConfirm({
+      title: "Sign out?",
+      message:
+        "You can read everything without an account. You will need to sign in again to join a Chautari conversation.",
+      cancelLabel: "Stay signed in",
+      confirmLabel: "Sign out",
+      // This phone stops getting the reader's follow alerts first, while
+      // there is still a session to prove who is asking.
+      onConfirm: () => {
+        setLeaving(true);
+        setConfirm(null); // the page itself shows the spinner now
+        return releasePushToken(getToken)
+          .then(() => signOut())
+          .then(
+            () => router.replace("/settings"),
+            () => {
+              setLeaving(false);
+              setError("Could not sign out. Please try again.");
+            },
+          );
+      },
+    });
   }, [signOut, getToken, router]);
 
   /**
@@ -304,35 +313,35 @@ function ProfileScreenActive() {
    */
   const confirmDeleteAccount = useCallback(() => {
     if (!user) return;
-    Alert.alert(
-      "Delete your account?",
-      "This permanently deletes your Inner Circle Nepal account, here and on icn.news. You can still read everything without one.",
-      [
-        { text: "Keep my account", style: "cancel" },
-        {
-          text: "Delete account",
-          style: "destructive",
-          onPress: () => {
-            setError(null);
-            void releasePushToken(getToken)
-              .then(() => user.delete())
-              .then(() => signOut())
-              .then(
-                () => router.replace("/settings"),
-                (e: unknown) => {
-                  const errs = (e as { errors?: { longMessage?: string; message?: string }[] })
-                    ?.errors;
-                  setError(
-                    errs?.[0]?.longMessage ||
-                      errs?.[0]?.message ||
-                      "Could not delete your account. Please try again or email newsroom@icn.news.",
-                  );
-                },
+    setConfirm({
+      title: "Delete your account?",
+      message:
+        "This permanently deletes your Inner Circle Nepal account, here and on icn.news. You can still read everything without one.",
+      cancelLabel: "Keep my account",
+      confirmLabel: "Delete account",
+      destructive: true,
+      onConfirm: () => {
+        setError(null);
+        setLeaving(true);
+        setConfirm(null); // the page itself shows the spinner now
+        return releasePushToken(getToken)
+          .then(() => user.delete())
+          .then(() => signOut())
+          .then(
+            () => router.replace("/settings"),
+            (e: unknown) => {
+              setLeaving(false);
+              const errs = (e as { errors?: { longMessage?: string; message?: string }[] })
+                ?.errors;
+              setError(
+                errs?.[0]?.longMessage ||
+                  errs?.[0]?.message ||
+                  "Could not delete your account. Please try again or email newsroom@icn.news.",
               );
-          },
-        },
-      ],
-    );
+            },
+          );
+      },
+    });
   }, [user, signOut, getToken, router]);
 
   /* ------------------------------------------------------------- gates */
@@ -348,7 +357,7 @@ function ProfileScreenActive() {
     );
   }
 
-  if (!isLoaded || profileLoading) {
+  if (!isLoaded || profileLoading || leaving) {
     return (
       <Shell onBack={back}>
         <View style={styles.loading}>
@@ -694,6 +703,7 @@ function ProfileScreenActive() {
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+      <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
     </Shell>
   );
 }

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
   Linking,
+  Platform,
   Pressable,
   Share,
   StyleSheet,
@@ -70,6 +70,7 @@ import { useRoomEffects } from "@/features/chautari/useRoomEffects";
 import { useRoomReactions } from "@/features/chautari/useRoomReactions";
 import { ReactionLayer } from "@/components/chautari/ReactionLayer";
 import { useMyProfile } from "@/features/profile/useMyProfile";
+import { ConfirmSheet, type ConfirmRequest } from "@/components/ConfirmSheet";
 import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 import { useToast } from "@/components/Toast";
@@ -218,7 +219,7 @@ function ChautariRoomScreenActive() {
 
   const { palette } = useTheme();
   const insets = useSafeAreaInsets();
-  const { isSignedIn, getToken, userId } = useAuth();
+  const { isLoaded: authLoaded, isSignedIn, getToken, userId } = useAuth();
   const { user } = useUser();
 
   const { profile, isError: profileError, refetch: refetchProfile } = useMyProfile();
@@ -275,7 +276,9 @@ function ChautariRoomScreenActive() {
   const details = useQuery({
     queryKey: ["chautari-room", slug, Boolean(isSignedIn)],
     queryFn: () => getRoomDetails(slug, isSignedIn ? getToken : undefined),
-    enabled: Boolean(slug),
+    // Once Clerk knows who this is, or the details are fetched twice (signed
+    // out, then signed in) and Go live can be missing for a moment.
+    enabled: Boolean(slug) && authLoaded,
     // A missing room is an answer, not a failure: no point asking again.
     retry: (count, e) => count < 1 && !isRoomNotFound(e),
     refetchInterval: (q) => (q.state.data?.room.status === "scheduled" ? 20_000 : false),
@@ -303,6 +306,8 @@ function ChautariRoomScreenActive() {
   const [starting, setStarting] = useState(false);
   /** Why Go live or Cancel failed in the waiting room; shown on that screen. */
   const [waitingError, setWaitingError] = useState<string | null>(null);
+  /** The question on screen before removing someone, starting early or cancelling. */
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
   const refreshRoom = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["chautari-room", slug] });
     void queryClient.invalidateQueries({ queryKey: ["chautari-rooms"] });
@@ -387,18 +392,18 @@ function ChautariRoomScreenActive() {
         void act(member.identity, action);
         return;
       }
-      Alert.alert(
-        `Remove ${member.name}?`,
-        "They will be disconnected and cannot rejoin this room.",
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Remove",
-            style: "destructive",
-            onPress: () => void act(member.identity, "remove"),
-          },
-        ],
-      );
+      const ask = () =>
+        setConfirm({
+          title: `Remove ${member.name}?`,
+          message: "They will be disconnected and cannot rejoin this room.",
+          cancelLabel: "Keep them",
+          confirmLabel: "Remove",
+          destructive: true,
+          onConfirm: () => act(member.identity, "remove"),
+        });
+      // The person sheet is closing as this runs; on iOS a sheet opened while
+      // another is still sliding away is never shown.
+      setTimeout(ask, Platform.OS === "ios" ? 350 : 0);
     },
     [act],
   );
@@ -672,30 +677,37 @@ function ChautariRoomScreenActive() {
           .finally(() => setStarting(false));
       };
       if (!startEarly) return run();
-      Alert.alert("Start early?", "The room is scheduled for later. Anyone waiting will be let in now.", [
-        { text: "Not yet", style: "cancel" },
-        { text: "Go live now", onPress: run },
-      ]);
+      setConfirm({
+        title: "Start early?",
+        message: "The room is scheduled for later. Anyone waiting will be let in now.",
+        cancelLabel: "Not yet",
+        confirmLabel: "Go live now",
+        onConfirm: run,
+      });
     };
     const cancel = () =>
-      Alert.alert("Cancel this room?", "It comes off the schedule for everyone.", [
-        { text: "Keep it", style: "cancel" },
-        {
-          text: "Cancel room",
-          style: "destructive",
-          onPress: () => {
-            setWaitingError(null);
-            void endRoom(getTokenRef.current, slug)
-              .then(refreshRoom)
-              .then(() => router.replace("/chautari"))
-              .catch((e: unknown) =>
-                setWaitingError(
-                  `Could not cancel the room. ${e instanceof ChautariError ? e.message : "Please try again."}`,
-                ),
-              );
-          },
+      setConfirm({
+        title: "Cancel this room?",
+        message: "It comes off the schedule for everyone.",
+        cancelLabel: "Keep it",
+        confirmLabel: "Cancel room",
+        destructive: true,
+        onConfirm: () => {
+          setWaitingError(null);
+          // Leave first, then refresh: refreshed here, the room reads "ended"
+          // and this screen would flash "This room did not go ahead".
+          return endRoom(getTokenRef.current, slug)
+            .then(() => {
+              router.replace("/chautari");
+              void refreshRoom();
+            })
+            .catch((e: unknown) =>
+              setWaitingError(
+                `Could not cancel the room. ${e instanceof ChautariError ? e.message : "Please try again."}`,
+              ),
+            );
         },
-      ]);
+      });
 
     return (
       <Shell onBack={goBack} onShare={share} title={roomDetails.title} lock={lock}>
@@ -717,6 +729,7 @@ function ChautariRoomScreenActive() {
           slug={slug}
           exclude={inviteExclude}
         />
+        <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
       </Shell>
     );
   }
@@ -743,6 +756,18 @@ function ChautariRoomScreenActive() {
           title="Live audio needs the full app"
           description="This preview build cannot play live conversations. Install Inner Circle Nepal from the app store to listen."
         />
+      </Shell>
+    );
+  }
+
+  // Clerk still reading the saved sign-in (a cold start from a notification
+  // or a link): wait, rather than flash "Sign in to join".
+  if (!authLoaded) {
+    return (
+      <Shell onBack={back} onShare={null} title={title}>
+        <View style={styles.authLoading}>
+          <ActivityIndicator color={palette.quiet} />
+        </View>
       </Shell>
     );
   }
@@ -1107,6 +1132,7 @@ function ChautariRoomScreenActive() {
         connected={room.phase === "connected"}
         insetsBottom={insets.bottom}
       />
+      <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
     </Shell>
   );
 }
@@ -1308,6 +1334,7 @@ function SectionHeader({
 /* ------------------------------------------------------------------- styles */
 
 const styles = StyleSheet.create({
+  authLoading: { flex: 1, alignItems: "center", justifyContent: "center" },
   effectLine: {
     alignSelf: "center",
     paddingHorizontal: 14,
@@ -1453,6 +1480,3 @@ const styles = StyleSheet.create({
 
   pressed: { opacity: 0.75 },
 });
-
-/* Suppress unused-import warnings for things kept intentionally. */
-void ActivityIndicator;

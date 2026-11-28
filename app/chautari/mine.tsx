@@ -1,5 +1,5 @@
 import React from "react";
-import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { useRouter } from "expo-router";
 import { useAuth } from "@clerk/clerk-expo";
 import { useQuery } from "@tanstack/react-query";
@@ -37,7 +37,7 @@ function MyRoomsUnavailable() {
 function MyRoomsActive() {
   const router = useRouter();
   const { palette } = useTheme();
-  const { isSignedIn, getToken } = useAuth();
+  const { isLoaded, isSignedIn, getToken } = useAuth();
 
   const rooms = useQuery({
     queryKey: ["chautari-my-rooms"],
@@ -47,6 +47,17 @@ function MyRoomsActive() {
   });
 
   const back = () => (router.canGoBack() ? router.back() : router.replace("/chautari"));
+
+  // Clerk still reading the saved sign-in: wait rather than say "Sign in".
+  if (!isLoaded) {
+    return (
+      <Frame onBack={back}>
+        <View style={styles.loading}>
+          <ActivityIndicator color={palette.quiet} />
+        </View>
+      </Frame>
+    );
+  }
 
   if (!isSignedIn) {
     return (
@@ -176,6 +187,7 @@ function Frame({ children, onBack }: { children: React.ReactNode; onBack: () => 
 }
 
 const styles = StyleSheet.create({
+  loading: { flex: 1, alignItems: "center", justifyContent: "center", paddingTop: 48 },
   screen: { flex: 1 },
   topBar: {
     height: 48,

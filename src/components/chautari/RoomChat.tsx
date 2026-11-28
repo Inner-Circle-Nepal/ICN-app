@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from "react";
 import {
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -30,6 +29,7 @@ import { ActionRow } from "./ActionRow";
 import { ReportForm } from "./ReportForm";
 import { InfoIcon } from "./RoomIcons";
 import { ToastHost } from "@/components/Toast";
+import { ConfirmSheet, type ConfirmRequest } from "@/components/ConfirmSheet";
 import { ErrorMessage } from "@/components/ErrorMessage";
 
 /* ------------------------------------------------------------ role tag */
@@ -168,6 +168,8 @@ export function ChatSheet({
   const [reporting, setReporting] = useState(false);
   // The ⓘ beside the title: long-press is invisible until someone says so.
   const [showHelp, setShowHelp] = useState(false);
+  /** Asked before deleting your own message. */
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   // Inverted list: newest first in the data, drawn at the bottom.
   const newestFirst = useMemo(() => [...chat.messages].reverse(), [chat.messages]);
@@ -192,10 +194,14 @@ export function ChatSheet({
       setActing(message);
       return;
     }
-    Alert.alert("Delete your message?", message.text, [
-      { text: "Cancel", style: "cancel" },
-      { text: "Delete", style: "destructive", onPress: () => void chat.remove(message.id) },
-    ]);
+    setConfirm({
+      title: "Delete your message?",
+      message: `“${message.text}”`,
+      cancelLabel: "Keep it",
+      confirmLabel: "Delete",
+      destructive: true,
+      onConfirm: () => chat.remove(message.id),
+    });
   };
 
   const close = () => {
@@ -412,6 +418,7 @@ export function ChatSheet({
           )}
         </View>
       </KeyboardAvoidingView>
+      <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />
       <ToastHost />
     </Modal>
   );

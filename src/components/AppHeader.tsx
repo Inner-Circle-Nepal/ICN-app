@@ -22,10 +22,12 @@ import { useAuth } from "@clerk/clerk-expo";
 function AccountButton() {
   const router = useRouter();
   const { palette } = useTheme();
-  const { isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useAuth();
   return (
     <Pressable
-      onPress={() => router.push(isSignedIn ? "/profile" : "/sign-in")}
+      // Before Clerk has loaded, the profile page (which waits for it) is the
+      // safe target: it shows the profile, or the sign-in invitation.
+      onPress={() => router.push(isLoaded && !isSignedIn ? "/sign-in" : "/profile")}
       hitSlop={10}
       accessibilityRole="button"
       accessibilityLabel={isSignedIn ? "Your profile" : "Sign in"}
