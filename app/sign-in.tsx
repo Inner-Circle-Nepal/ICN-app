@@ -124,6 +124,9 @@ function SignInScreenActive() {
   /**
    * Clerk reports an unknown address as a sign-in failure, so a first-time
    * reader is moved to sign-up rather than shown an error they cannot act on.
+   * Only that failure: any other (too many codes asked for, the network, a
+   * sign-in already under way) is shown as it is. Falling through to sign-up
+   * on those told existing readers their own address was "taken".
    */
   const sendCode = async () => {
     const address = email.trim().toLowerCase();
@@ -138,7 +141,11 @@ function SignInScreenActive() {
       await signIn!.create({ identifier: address, strategy: "email_code" });
       setIsNewAccount(false);
       setStage("code");
-    } catch {
+    } catch (signInError) {
+      if (!isUnknownAddress(signInError)) {
+        setError(readableClerkError(signInError, "We could not send a code to that address."));
+        return;
+      }
       try {
         await signUp!.create({ emailAddress: address });
         await signUp!.prepareEmailAddressVerification({ strategy: "email_code" });
@@ -373,6 +380,17 @@ function randomPassword(): string {
   const body = Array.from(Crypto.getRandomBytes(32), (b) => chars[b % chars.length]).join("");
   // One of each class, so any complexity rule on the Clerk side is met.
   return `${body}aZ7#`;
+}
+
+/** Clerk's error codes, e.g. `form_identifier_not_found`. */
+function clerkErrorCodes(e: unknown): string[] {
+  const errs = (e as { errors?: { code?: string }[] })?.errors;
+  return (errs ?? []).map((x) => x.code ?? "").filter(Boolean);
+}
+
+/** Sign-in failed because no account has this address: offer sign-up. */
+function isUnknownAddress(e: unknown): boolean {
+  return clerkErrorCodes(e).includes("form_identifier_not_found");
 }
 
 /** Clerk's errors are structured; show the first message, not a stack. */
