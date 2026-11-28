@@ -55,3 +55,6 @@ local-backend.env
 
 # Marketing material (ad videos and their sources): not part of the app
 marketing/
+
+# Local Android store builds (npx eas-cli build --local) land in the repo root
+build-*.aab
