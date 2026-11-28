@@ -301,6 +301,8 @@ function ChautariRoomScreenActive() {
   }, [liveAudioSupported, isSignedIn, slug, hintedTitle, hintedHost, enter, readyToJoin]);
 
   const [starting, setStarting] = useState(false);
+  /** Why Go live or Cancel failed in the waiting room; shown on that screen. */
+  const [waitingError, setWaitingError] = useState<string | null>(null);
   const refreshRoom = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: ["chautari-room", slug] });
     void queryClient.invalidateQueries({ queryKey: ["chautari-rooms"] });
@@ -659,12 +661,12 @@ function ChautariRoomScreenActive() {
         new Date(roomDetails.scheduledFor).getTime() - Date.now() > 15 * 60_000;
       const run = () => {
         setStarting(true);
+        setWaitingError(null);
         void startRoom(getTokenRef.current, slug)
           .then(refreshRoom)
           .catch((e: unknown) =>
-            Alert.alert(
-              "Could not start the room",
-              e instanceof ChautariError ? e.message : "Please try again.",
+            setWaitingError(
+              `Could not start the room. ${e instanceof ChautariError ? e.message : "Please try again."}`,
             ),
           )
           .finally(() => setStarting(false));
@@ -682,13 +684,13 @@ function ChautariRoomScreenActive() {
           text: "Cancel room",
           style: "destructive",
           onPress: () => {
+            setWaitingError(null);
             void endRoom(getTokenRef.current, slug)
               .then(refreshRoom)
               .then(() => router.replace("/chautari"))
               .catch((e: unknown) =>
-                Alert.alert(
-                  "Could not cancel",
-                  e instanceof ChautariError ? e.message : "Please try again.",
+                setWaitingError(
+                  `Could not cancel the room. ${e instanceof ChautariError ? e.message : "Please try again."}`,
                 ),
               );
           },
@@ -703,6 +705,8 @@ function ChautariRoomScreenActive() {
           starting={starting}
           onGoLive={goLive}
           onCancel={cancel}
+          actionError={waitingError}
+          onDismissError={() => setWaitingError(null)}
           onInvite={() => setInviteOpen(true)}
           onOpenProfile={viewProfile}
           insetsBottom={insets.bottom}

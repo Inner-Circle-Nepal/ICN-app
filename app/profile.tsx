@@ -361,10 +361,12 @@ function ProfileScreenActive() {
   if (!isSignedIn || !user) {
     return (
       <Shell onBack={back}>
-        <ErrorState
+        <EmptyState
+          kicker="Your account"
           title="You are not signed in"
-          message="Reading needs no account. Sign in to join a Chautari conversation and to keep your edition between devices."
-          onRetry={() => router.push("/sign-in")}
+          description="Reading needs no account. Sign in to join a Chautari conversation and to keep your edition between devices."
+          actionLabel="Sign in"
+          onAction={() => router.push("/sign-in")}
         />
       </Shell>
     );

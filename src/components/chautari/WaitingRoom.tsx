@@ -6,6 +6,7 @@ import type { RoomDetails, RoomPerson } from "@/lib/api/chautari";
 import { formatBooking, formatCountdown } from "@/features/chautari/schedule";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
+import { ErrorMessage } from "@/components/ErrorMessage";
 import { Avatar } from "./Avatar";
 
 /**
@@ -20,6 +21,8 @@ export function WaitingRoom({
   starting,
   onGoLive,
   onCancel,
+  actionError,
+  onDismissError,
   onInvite,
   onOpenProfile,
   insetsBottom,
@@ -29,6 +32,9 @@ export function WaitingRoom({
   starting: boolean;
   onGoLive: () => void;
   onCancel: () => void;
+  /** Why going live or cancelling failed, shown above the buttons. */
+  actionError: string | null;
+  onDismissError: () => void;
   /** Host or moderator: invite people to this room. */
   onInvite: () => void;
   onOpenProfile: (username: string) => void;
@@ -139,6 +145,14 @@ export function WaitingRoom({
         </View>
       </ScrollView>
 
+      {canStart && actionError ? (
+        <ErrorMessage
+          compact
+          style={styles.actionError}
+          message={actionError}
+          onDismiss={onDismissError}
+        />
+      ) : null}
       {canStart ? (
         <View
           style={[
@@ -261,6 +275,7 @@ const styles = StyleSheet.create({
   personName: { fontFamily: fontFamilies.serifMedium, fontSize: 16 },
   personMeta: { fontFamily: fontFamilies.sansRegular, fontSize: 12, marginTop: 2 },
   note: { fontFamily: fontFamilies.serifRegular, fontSize: 14.5, lineHeight: 21, marginTop: 20 },
+  actionError: { marginHorizontal: spacing.gutter, marginBottom: 10 },
   bar: {
     flexDirection: "row",
     alignItems: "center",

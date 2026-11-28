@@ -11,6 +11,7 @@ import { getMyRooms, type MyRoom } from "@/lib/api/chautari";
 import { formatBooking } from "@/features/chautari/schedule";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies, spacing } from "@/theme/tokens";
+import { EmptyState } from "@/components/EmptyState";
 import { ErrorState } from "@/components/ErrorState";
 
 /**
@@ -50,10 +51,12 @@ function MyRoomsActive() {
   if (!isSignedIn) {
     return (
       <Frame onBack={back}>
-        <ErrorState
+        <EmptyState
+          kicker="Chautari"
           title="Sign in to see your rooms"
-          message="Rooms you host or moderate appear here."
-          onRetry={() => router.push("/sign-in")}
+          description="Rooms you host or moderate appear here."
+          actionLabel="Sign in"
+          onAction={() => router.push("/sign-in")}
         />
       </Frame>
     );
