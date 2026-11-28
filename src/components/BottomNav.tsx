@@ -11,6 +11,7 @@ import { discoverRooms } from "@/lib/api/chautari";
 import { ChautariTabIcon } from "./ChautariTabIcon";
 import { useTheme } from "@/hooks/useTheme";
 import { fontFamilies } from "@/theme/tokens";
+import { emitTabReselect } from "@/lib/navigation/tabReselect";
 
 /**
  * Editorial bottom navigation bar.
@@ -199,7 +200,11 @@ export function BottomNav() {
           <Pressable
             key={tab.key}
             onPress={() => {
-              if (tab.active) return;
+              // Already here: the screen decides (Home goes back to the top).
+              if (tab.active) {
+                emitTabReselect(tab.href);
+                return;
+              }
               /*
                * Set the optimistic pending href FIRST so the icon flips to
                * selected state this same frame. `navigate` kicks off the
