@@ -206,11 +206,14 @@ function ChautariRoomScreenActive() {
     slug?: string | string[];
     title?: string;
     host?: string;
+    live?: string;
   }>();
   const raw = Array.isArray(params.slug) ? params.slug[0] : params.slug;
   const slug = raw ? decodeURIComponent(raw) : "";
   const hintedTitle = typeof params.title === "string" ? params.title : null;
   const hintedHost = typeof params.host === "string" && params.host ? params.host : null;
+  // Set by the room list for a room it showed as live (see readyToJoin).
+  const hintedLive = params.live === "1";
 
   const { recordChautariOpen } = usePushNudge();
   useEffect(() => {
@@ -239,10 +242,17 @@ function ChautariRoomScreenActive() {
   /*
    * The hand follows the server: once the room carries it as an attribute,
    * it survives a reconnect and comes down by itself when the host answers.
-   * `handFallback` covers a server that could not tell the room.
+   * A tap shows at once through `handLocal`, which holds the tapped value
+   * until the room's attribute moves away from what it was at the tap (the
+   * server's change arriving), then the attribute takes over again. `sticky`
+   * covers a server that could not tell the room: the tapped value stays.
    */
-  const [handFallback, setHandFallback] = useState<boolean | null>(null);
-  const [handBusy, setHandBusy] = useState(false);
+  const [handLocal, setHandLocal] = useState<{
+    value: boolean;
+    attrAtTap: boolean;
+    sticky: boolean;
+  } | null>(null);
+  const handInFlight = useRef(false);
   const [notice, setNotice] = useState<string | null>(null);
   const toast = useToast();
 
@@ -256,7 +266,11 @@ function ChautariRoomScreenActive() {
   const isModerator = !isHost && (localMember?.isModerator ?? room.role === "moderator");
   const canModerate = isHost || isModerator;
   const myRole = isHost ? "host" : isModerator ? "moderator" : room.canPublish ? "speaker" : "listener";
-  const handRaised = handFallback ?? localMember?.handRaised ?? false;
+  const handAttr = localMember?.handRaised ?? false;
+  const handRaised =
+    handLocal && (handLocal.sticky || handAttr === handLocal.attrAtTap)
+      ? handLocal.value
+      : handAttr;
   const title = room.identity?.title ?? hintedTitle ?? "Chautari";
 
   const getTokenRef = useRef(getToken);
@@ -274,7 +288,9 @@ function ChautariRoomScreenActive() {
   const queryClient = useQueryClient();
   const alreadyHere = active?.slug === slug;
   const details = useQuery({
-    queryKey: ["chautari-room", slug, Boolean(isSignedIn)],
+    // Per account: `canStart` (Go live, Invite, the lock) is about who asks,
+    // and another account on this phone must never see the last one's answer.
+    queryKey: ["chautari-room", slug, isSignedIn ? (userId ?? null) : null],
     queryFn: () => getRoomDetails(slug, isSignedIn ? getToken : undefined),
     // Once Clerk knows who this is, or the details are fetched twice (signed
     // out, then signed in) and Go live can be missing for a moment.
@@ -287,21 +303,47 @@ function ChautariRoomScreenActive() {
   // The list passes the host's name along; a room opened any other way (just
   // created, a link, a notification) gets it from the room's details.
   const hostName = hintedHost ?? roomDetails?.host.name ?? null;
+  /*
+   * A room opened from the list as live joins straight away, and the token
+   * route can answer that it hasn't started (it was only booked, or the
+   * booking lapsed, which the token route also calls "not started"). Then
+   * the details decide, as for any other room: the waiting room, or "did
+   * not go ahead".
+   */
+  const notStarted = room.phase === "error" && room.errorReason === "room_not_started";
   const missing = !alreadyHere && isRoomNotFound(details.error);
-  const waiting = !alreadyHere && roomDetails?.status === "scheduled";
-  const lapsed = !alreadyHere && roomDetails?.status === "ended";
-  // Do not join until we know the room is live. An older server without the
-  // details endpoint errors here, and the join goes ahead as before.
+  const waiting = (!alreadyHere || notStarted) && roomDetails?.status === "scheduled";
+  const lapsed = (!alreadyHere || notStarted) && roomDetails?.status === "ended";
+  // Do not join until we know the room is live, unless the list just showed
+  // it live: then the details load alongside, for the banner, host and
+  // moderators. An older server without the details endpoint errors here,
+  // and the join goes ahead as before.
   // The server names a participant from their profile once, at join. Joining
   // before the profile exists (a new reader still on the sign-up form)
   // would show them as "Guest" for the whole session.
   const readyToJoin =
-    alreadyHere || (!details.isLoading && !missing && !waiting && !lapsed && profile !== null);
+    alreadyHere ||
+    ((hintedLive || !details.isLoading) && !missing && !waiting && !lapsed && profile !== null);
 
   useEffect(() => {
     if (!liveAudioSupported || !isSignedIn || !slug || !readyToJoin) return;
     enter({ slug, hintedTitle, hintedHost });
   }, [liveAudioSupported, isSignedIn, slug, hintedTitle, hintedHost, enter, readyToJoin]);
+
+  // "Not started": the details may predate that answer, so ask again.
+  const refetchDetails = details.refetch;
+  useEffect(() => {
+    if (notStarted) void refetchDetails();
+  }, [notStarted, refetchDetails]);
+  // The waiting room it fell back to goes live: join, as a fresh room would.
+  const roomStatus = roomDetails?.status;
+  const lastStatus = useRef(roomStatus);
+  const retryJoin = room.retry;
+  useEffect(() => {
+    const was = lastStatus.current;
+    lastStatus.current = roomStatus;
+    if (notStarted && was === "scheduled" && roomStatus === "live") retryJoin();
+  }, [notStarted, roomStatus, retryJoin]);
 
   const [starting, setStarting] = useState(false);
   /** Why Go live or Cancel failed in the waiting room; shown on that screen. */
@@ -346,24 +388,29 @@ function ChautariRoomScreenActive() {
   }, [slug, title]);
 
   const toggleHand = useCallback(async () => {
-    if (handBusy) return;
-    setHandBusy(true);
+    // One request at a time; the button already shows the tapped value.
+    if (handInFlight.current) return;
+    handInFlight.current = true;
+    const previous = handLocal;
     const next = !handRaised;
+    setHandLocal({ value: next, attrAtTap: handAttr, sticky: false });
     try {
       const { visible } = await setHandRaised(getTokenRef.current, {
         roomSlug: slug,
         raised: next,
         displayName,
       });
-      setHandFallback(visible ? null : next);
+      // Not visible to the room: keep the tapped value, as before.
+      if (!visible) setHandLocal({ value: next, attrAtTap: handAttr, sticky: true });
       // The button itself shows it (red, pulsing); no message to read.
       setNotice(null);
     } catch (e) {
+      setHandLocal(previous);
       setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
     } finally {
-      setHandBusy(false);
+      handInFlight.current = false;
     }
-  }, [handBusy, handRaised, slug, displayName]);
+  }, [handLocal, handRaised, handAttr, slug, displayName]);
 
   const act = useCallback(
     async (targetUserId: string, action: ModerationAction) => {
@@ -519,18 +566,22 @@ function ChautariRoomScreenActive() {
     }, [connected]),
   );
 
-  /* Applause: the host or a moderator asks the server; every app plays it. */
+  /*
+   * Applause: the host or a moderator asks the server; every app, the
+   * clapper's included, plays it when the server's packet arrives. No
+   * spinner; one request at a time, and a refusal is shown.
+   */
   const effectLine = useRoomEffects(room);
-  const [clapBusy, setClapBusy] = useState(false);
+  const clapInFlight = useRef(false);
   const clap = async () => {
-    if (clapBusy) return;
-    setClapBusy(true);
+    if (clapInFlight.current) return;
+    clapInFlight.current = true;
     try {
       await playRoomEffect(getToken, slug, "clap");
     } catch (e) {
       setNotice(e instanceof ChautariError ? e.message : "Could not do that.");
     } finally {
-      setClapBusy(false);
+      clapInFlight.current = false;
     }
   };
   // Emoji reactions: anyone in the room; they float up from the bottom right.
@@ -800,6 +851,17 @@ function ChautariRoomScreenActive() {
 
   if (room.phase === "left") {
     return <Shell onBack={back} onShare={null} title={title} />;
+  }
+
+  // "Not started" while the details are asked again: waiting room or lapsed next.
+  if (notStarted && details.isFetching) {
+    return (
+      <Shell onBack={back} onShare={null} title={title}>
+        <View style={styles.authLoading}>
+          <ActivityIndicator color={palette.quiet} />
+        </View>
+      </Shell>
+    );
   }
 
   if (room.phase === "error" && room.errorReason === "invite_only") {
@@ -1123,10 +1185,8 @@ function ChautariRoomScreenActive() {
         onToggleMic={room.toggleMic}
         onLeave={canModerate ? () => setLeaveOpen(true) : leaveAndBack}
         handRaised={handRaised}
-        handBusy={handBusy}
         onToggleHand={() => void toggleHand()}
         onClap={() => void clap()}
-        clapBusy={clapBusy}
         onReact={isSignedIn ? reactions.react : undefined}
         onGift={canGift ? () => setGiftOpen(true) : undefined}
         connected={room.phase === "connected"}

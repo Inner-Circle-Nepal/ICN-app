@@ -143,7 +143,13 @@ function ChautariLobby() {
   const openRoom = (room: DiscoverRoom) =>
     router.push({
       pathname: "/chautari/[slug]",
-      params: { slug: room.slug, title: room.title, host: room.hostName ?? "" },
+      params: {
+        slug: room.slug,
+        title: room.title,
+        host: room.hostName ?? "",
+        // The list saw it live: the room screen joins without waiting for its details.
+        ...(room.status === "live" ? { live: "1" } : {}),
+      },
     });
 
   return (
